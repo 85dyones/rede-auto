@@ -59,3 +59,43 @@ export function all<T, E>(results: readonly Result<T, E>[]): Result<T[], E> {
   }
   return ok(values);
 }
+
+/**
+ * Valida varios campos de uma vez e monta o objeto resultante.
+ *
+ * Devolve o primeiro erro como erro principal (codigo e mensagem precisos, bons
+ * para a API) e anexa os demais em `details.outrosErros`, para que um formulario
+ * consiga apontar todos os campos invalidos numa unica ida ao servidor.
+ */
+export function combine<T extends Record<string, Result<unknown, { details?: unknown }>>>(
+  results: T,
+): Result<
+  { [K in keyof T]: T[K] extends Result<infer U, unknown> ? U : never },
+  T[keyof T] extends Result<unknown, infer E> ? E : never
+> {
+  const failures: unknown[] = [];
+  const value: Record<string, unknown> = {};
+
+  for (const key of Object.keys(results)) {
+    const result = results[key] as Result<unknown, unknown>;
+    if (result.ok) value[key] = result.value;
+    else failures.push(result.error);
+  }
+
+  if (failures.length === 0) {
+    return ok(value as never);
+  }
+
+  const [primary, ...others] = failures as [Record<string, unknown>, ...unknown[]];
+  const enriched =
+    others.length === 0
+      ? primary
+      : {
+          ...primary,
+          details: {
+            ...((primary['details'] as Record<string, unknown> | undefined) ?? {}),
+            outrosErros: others,
+          },
+        };
+  return err(enriched as never);
+}

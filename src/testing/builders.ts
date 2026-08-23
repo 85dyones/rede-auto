@@ -1,0 +1,265 @@
+/**
+ * Construtores de dados para testes e para o roteiro de demonstracao.
+ *
+ * Cada builder devolve um agregado valido com defaults sensatos, permitindo que
+ * o teste sobrescreva apenas o campo que esta sob analise. Isso mantem os testes
+ * legiveis: o que aparece no `overrides` e exatamente o que importa para a regra
+ * sendo verificada.
+ */
+
+import {
+  type NetworkUser,
+  type Store,
+  type StoreProfile,
+  StoreKind,
+  StoreStatus,
+  UserRole,
+} from '../domain/network/store.ts';
+import { asStoreId, asUserId, type StoreId, type UserId } from '../domain/shared/ids.ts';
+
+/** CNPJs com digito verificador valido, para nao esbarrar na validacao real. */
+const VALID_CNPJS = [
+  '11222333000181',
+  '04252011000110',
+  '34028316000103',
+  '33000167000101',
+  '60746948000112',
+  '47960950000121',
+  '07526557000100',
+  '02558157000162',
+];
+
+let cnpjCursor = 0;
+
+export function nextValidCnpj(): string {
+  const cnpj = VALID_CNPJS[cnpjCursor % VALID_CNPJS.length] as string;
+  cnpjCursor += 1;
+  return cnpj;
+}
+
+export function resetCnpjCursor(): void {
+  cnpjCursor = 0;
+}
+
+export function buildStoreProfile(overrides: Partial<StoreProfile> = {}): StoreProfile {
+  return {
+    legalName: 'Auto Center Modelo Comercio de Veiculos LTDA',
+    tradeName: 'Auto Center Modelo',
+    cnpj: nextValidCnpj(),
+    city: 'Campinas',
+    state: 'SP',
+    phone: '1932334455',
+    email: 'contato@automodelo.com.br',
+    responsibleName: 'Maria Souza',
+    ...overrides,
+  };
+}
+
+export function buildStore(overrides: Partial<Store> = {}): Store {
+  return {
+    id: overrides.id ?? asStoreId(`str_${Math.random().toString(36).slice(2, 10)}`),
+    profile: overrides.profile ?? buildStoreProfile(),
+    kind: overrides.kind ?? StoreKind.FOUNDER,
+    status: overrides.status ?? StoreStatus.ACTIVE,
+    joinedAt: overrides.joinedAt ?? 0,
+    sponsorStoreId: overrides.sponsorStoreId ?? null,
+  };
+}
+
+export function buildUser(storeId: StoreId, overrides: Partial<NetworkUser> = {}): NetworkUser {
+  return {
+    id: overrides.id ?? asUserId(`usr_${Math.random().toString(36).slice(2, 10)}`),
+    storeId,
+    name: overrides.name ?? 'Carlos Vendedor',
+    email: overrides.email ?? 'carlos@loja.com.br',
+    role: overrides.role ?? UserRole.PRINCIPAL,
+    active: overrides.active ?? true,
+  };
+}
+
+export type FoundingNetwork = {
+  readonly founders: readonly Store[];
+  readonly principals: readonly NetworkUser[];
+  founderAt(index: number): Store;
+  principalAt(index: number): NetworkUser;
+};
+
+/** As 6 lojas fundadoras mais o titular de cada uma. */
+export function buildFoundingNetwork(count = 6): FoundingNetwork {
+  resetCnpjCursor();
+  const names = [
+    'Prime Motors',
+    'Veloz Seminovos',
+    'Garagem Central',
+    'Norte Automoveis',
+    'Sul Car',
+    'Via Livre Veiculos',
+    'Alfa Multimarcas',
+    'Beta Automoveis',
+  ];
+  const cities: ReadonlyArray<readonly [string, string]> = [
+    ['Campinas', 'SP'],
+    ['Sao Paulo', 'SP'],
+    ['Ribeirao Preto', 'SP'],
+    ['Curitiba', 'PR'],
+    ['Belo Horizonte', 'MG'],
+    ['Porto Alegre', 'RS'],
+    ['Goiania', 'GO'],
+    ['Salvador', 'BA'],
+  ];
+
+  const founders: Store[] = [];
+  const principals: NetworkUser[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const tradeName = names[index] ?? `Loja Fundadora ${index + 1}`;
+    const [city, state] = cities[index] ?? (['Campinas', 'SP'] as const);
+    const storeId = asStoreId(`str_f${index + 1}`);
+    founders.push({
+      id: storeId,
+      profile: buildStoreProfile({
+        tradeName,
+        legalName: `${tradeName} Comercio de Veiculos LTDA`,
+        city,
+        state,
+        email: `contato@${slug(tradeName)}.com.br`,
+        responsibleName: `Titular ${index + 1}`,
+      }),
+      kind: StoreKind.FOUNDER,
+      status: StoreStatus.ACTIVE,
+      joinedAt: 0,
+      sponsorStoreId: null,
+    });
+    principals.push({
+      id: asUserId(`usr_f${index + 1}`),
+      storeId,
+      name: `Titular ${index + 1}`,
+      email: `titular${index + 1}@${slug(tradeName)}.com.br`,
+      role: UserRole.PRINCIPAL,
+      active: true,
+    });
+  }
+
+  return {
+    founders,
+    principals,
+    founderAt: (index) => founders[index] as Store,
+    principalAt: (index) => principals[index] as NetworkUser,
+  };
+}
+
+function slug(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+export const ids = {
+  store: (value: string): StoreId => asStoreId(value),
+  user: (value: string): UserId => asUserId(value),
+};
+
+// ---------------------------------------------------------------------------
+// Veiculos
+// ---------------------------------------------------------------------------
+
+import {
+  type InspectionReport,
+  type Vehicle,
+  type VehicleSpecs,
+  CommercialStatus,
+  FuelType,
+  InspectionStatus,
+  NO_FEED_SOURCE,
+  PhysicalState,
+  TransmissionType,
+} from '../domain/vehicle/vehicle.ts';
+import { asVehicleId, type VehicleId } from '../domain/shared/ids.ts';
+import { fromReais } from '../domain/shared/money.ts';
+import { DAY } from '../domain/shared/clock.ts';
+
+export function buildSpecs(overrides: Partial<VehicleSpecs> = {}): VehicleSpecs {
+  return {
+    brand: 'Chevrolet',
+    model: 'Onix',
+    version: '1.0 Turbo LTZ',
+    manufactureYear: 2022,
+    modelYear: 2023,
+    mileageKm: 38_400,
+    color: 'Prata',
+    fuel: FuelType.FLEX,
+    transmission: TransmissionType.AUTOMATIC,
+    doors: 4,
+    optionals: ['Ar-condicionado', 'Direcao eletrica', 'Multimidia'],
+    photos: ['https://cdn.exemplo.com/onix-1.jpg', 'https://cdn.exemplo.com/onix-2.jpg'],
+    ...overrides,
+  };
+}
+
+export function buildApprovedInspection(now: number, overrides: Partial<InspectionReport> = {}): InspectionReport {
+  return {
+    status: InspectionStatus.APPROVED,
+    reportNumber: 'LC-2026-004512',
+    provider: 'Cautelar Brasil',
+    issuedAt: now - 7 * DAY,
+    expiresAt: now + 83 * DAY,
+    ...overrides,
+  };
+}
+
+let vehicleCounter = 0;
+
+/**
+ * Veiculo pronto para circular: laudo aprovado, DISPONIVEL, no patio da dona.
+ * O teste sobrescreve so o que estiver sob analise.
+ */
+export function buildVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
+  vehicleCounter += 1;
+  const now = overrides.createdAt ?? 0;
+  const ownerStoreId = overrides.ownerStoreId ?? asStoreId('str_f1');
+  const id: VehicleId = overrides.id ?? asVehicleId(`veh_${String(vehicleCounter).padStart(4, '0')}`);
+
+  return {
+    id,
+    ownerStoreId,
+    plate: overrides.plate ?? `ABC${String(1000 + (vehicleCounter % 9000))}`,
+    chassis: overrides.chassis ?? `9BWZZZ377VT${String(100000 + vehicleCounter).slice(0, 6)}`,
+    specs: overrides.specs ?? buildSpecs(),
+    inspection: overrides.inspection ?? buildApprovedInspection(now),
+    pricing: overrides.pricing ?? {
+      publicPrice: fromReais(92_900),
+      netPrice: fromReais(85_000),
+      updatedAt: now,
+    },
+    commercialStatus: overrides.commercialStatus ?? CommercialStatus.AVAILABLE,
+    activeLockId: overrides.activeLockId ?? null,
+    physical: overrides.physical ?? {
+      state: PhysicalState.AT_YARD,
+      custodianStoreId: ownerStoreId,
+      inboundStoreId: null,
+      since: now,
+      openTransferId: null,
+    },
+    source: overrides.source ?? NO_FEED_SOURCE,
+    pendingNetPrice: overrides.pendingNetPrice ?? null,
+    missingFromFeed: overrides.missingFromFeed ?? false,
+    createdAt: now,
+    updatedAt: overrides.updatedAt ?? now,
+  };
+}
+
+/** Mesmo veiculo, mas fisicamente no patio de outra loja (estoque avancado). */
+export function atYardOf(vehicle: Vehicle, custodianStoreId: StoreId, since = 0): Vehicle {
+  return {
+    ...vehicle,
+    physical: {
+      state: PhysicalState.AT_YARD,
+      custodianStoreId,
+      inboundStoreId: null,
+      since,
+      openTransferId: null,
+    },
+  };
+}
