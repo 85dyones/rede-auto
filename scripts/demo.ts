@@ -490,6 +490,22 @@ for (const votante of [lojaB, lojaC, lojaD]) {
 }
 
 // ---------------------------------------------------------------------------
+ato('O mural de avisos de cada loja');
+
+for (const observador of [lojaB, lojaC]) {
+  const avisos = await context.repos.notifications.forStore({
+    storeId: observador.store.id,
+    limit: 4,
+  });
+  const naoLidas = await context.repos.notifications.unreadCount(observador.store.id);
+  diz(`${observador.store.profile.tradeName} — ${naoLidas} nao lidos:`);
+  for (const aviso of avisos) diz(`  [${aviso.severity.padEnd(15)}] ${aviso.title}`);
+}
+destaque(
+  'A trava que expira as 22h nao espera alguem abrir a tela: a rede e avisada na hora.',
+);
+
+// ---------------------------------------------------------------------------
 ato('Trilha de auditoria do veiculo');
 
 const trilha = await context.repos.audit.byAggregate(onixId, 100);

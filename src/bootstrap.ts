@@ -13,6 +13,7 @@ import { EventBus } from './domain/shared/events.ts';
 import { type AppConfig, loadConfig } from './config.ts';
 import type { AppContext } from './application/context.ts';
 import { startSweeper, type Sweeper } from './application/scheduler.ts';
+import { registerNotificationSubscriber } from './application/notifications.ts';
 import { createInMemoryRepositories, type Repositories } from './infra/persistence/repositories.ts';
 import { ApiKeyRegistry } from './infra/auth/api-keys.ts';
 import { Router } from './http/router.ts';
@@ -56,6 +57,9 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
     policies: config.policies,
     repos: options.repositories ?? createInMemoryRepositories(),
   };
+
+  // Assina antes do seed para que nada que aconteca depois passe despercebido.
+  registerNotificationSubscriber(context);
 
   const apiKeys = new ApiKeyRegistry();
   const router = buildRouter(context, config);

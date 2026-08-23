@@ -280,6 +280,7 @@ POST   /api/v1/negociacoes/:id/confirmacao           fecha a venda
 POST   /api/v1/veiculos/:id/entrega                  entrega ao comprador (encerra os dois eixos)
 POST   /api/v1/veiculos/:id/compartilhamentos        gera o link white-label
 POST   /api/v1/feeds/sincronizacao                   ingere o XML do integrador
+GET    /api/v1/notificacoes                          mural de avisos da loja
 GET    /s/:token/lamina.pdf                          lâmina em PDF (pública)
 ```
 
@@ -317,10 +318,11 @@ entregue aqui:
 - **autenticação de produção.** A chave de API é adaptador de desenvolvimento:
   falta rotação, revogação, escopo por chave (uma chave de integração de feed
   não deveria poder fechar venda) e limite de requisições.
-- **notificações.** Os eventos de domínio existem e o barramento está pronto;
-  falta o assinante que dispara push/WhatsApp em `lock.expired`,
-  `recall.sla_breached` e `vehicle.available_again` — que é onde a rede sente o
-  valor.
+- **entrega das notificações fora da plataforma.** O mural interno existe
+  (`GET /api/v1/notificacoes`) e já recebe os avisos que importam. Falta o
+  transporte para onde o lojista realmente olha: push, WhatsApp ou e-mail. O
+  assinante do barramento já está no lugar — é acrescentar um canal ao lado do
+  mural, não refazer o mecanismo.
 - **esquemas reais dos integradores.** Ver a ressalva na seção de ingestão.
 - **fotos servidas pela plataforma.** Hoje o proxy redireciona; para esconder o
   domínio também do tráfego, é preciso servir os bytes com cache. O contrato da

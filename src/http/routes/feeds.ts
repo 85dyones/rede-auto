@@ -46,6 +46,58 @@ export function registerFeedRoutes(router: Router, context: AppContext): void {
     return json(200, ingestionReportDto(result.value));
   });
 
+  /**
+   * Mural de avisos da loja.
+   *
+   * E o que fecha o laco do produto: sem isto, a trava que expira as 22h so
+   * seria descoberta por quem abrisse a tela no dia seguinte, e o gerente
+   * continuaria sabendo das coisas por telefone.
+   */
+  router.get('/api/v1/notificacoes', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const notifications = await context.repos.notifications.forStore({
+      storeId: actor.value.store.id,
+      unreadOnly: request.query.get('naoLidas') === 'true',
+      limit: Math.min(queryInteger(request.query, 'limite') ?? 50, 200),
+    });
+
+    return json(200, {
+      naoLidas: await context.repos.notifications.unreadCount(actor.value.store.id),
+      total: notifications.length,
+      avisos: notifications.map((notification) => ({
+        id: notification.id,
+        tipo: notification.eventType,
+        urgencia: notification.severity,
+        titulo: notification.title,
+        texto: notification.body,
+        agregadoId: notification.aggregateId,
+        ocorridoEm: instant(notification.occurredAt),
+        lidoEm: instant(notification.readAt),
+      })),
+    });
+  });
+
+  router.post('/api/v1/notificacoes/:id/lida', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const updated = await context.repos.notifications.markRead(
+      request.params['id'] as string,
+      actor.value.store.id,
+      context.clock.now(),
+    );
+    if (updated === undefined) {
+      return json(404, {
+        erro: { codigo: 'NOTIFICATION_NOT_FOUND', mensagem: 'Aviso nao encontrado.' },
+        requestId: request.requestId,
+      });
+    }
+
+    return json(200, { id: updated.id, lidoEm: instant(updated.readAt) });
+  });
+
   /** Trilha de auditoria derivada dos eventos de dominio. */
   router.get('/api/v1/auditoria', async (request) => {
     const actor = requireActor(request);

@@ -32,6 +32,7 @@ import type { Recall } from '../../domain/recall/recall.ts';
 import { isOpen as isRecallOpen } from '../../domain/recall/recall.ts';
 import type { Deal } from '../../domain/deal/deal.ts';
 import type { ShareLink } from '../../domain/sharing/share-link.ts';
+import type { Notification } from '../../application/notifications.ts';
 
 export type StoreRepository = {
   save(store: Store): Promise<void>;
@@ -130,6 +131,19 @@ export type AuditRepository = {
   recent(limit?: number): Promise<AuditEntry[]>;
 };
 
+export type NotificationQuery = {
+  readonly storeId: StoreId;
+  readonly unreadOnly?: boolean;
+  readonly limit?: number;
+};
+
+export type NotificationRepository = {
+  append(notification: Notification): Promise<void>;
+  forStore(query: NotificationQuery): Promise<Notification[]>;
+  markRead(id: string, storeId: StoreId, at: Instant): Promise<Notification | undefined>;
+  unreadCount(storeId: StoreId): Promise<number>;
+};
+
 export type Repositories = {
   readonly stores: StoreRepository;
   readonly users: UserRepository;
@@ -141,6 +155,7 @@ export type Repositories = {
   readonly deals: DealRepository;
   readonly shareLinks: ShareLinkRepository;
   readonly audit: AuditRepository;
+  readonly notifications: NotificationRepository;
 };
 
 // ---------------------------------------------------------------------------
@@ -427,6 +442,46 @@ class InMemoryAuditRepository implements AuditRepository {
   }
 }
 
+class InMemoryNotificationRepository implements NotificationRepository {
+  readonly #byStore = new Map<string, Notification[]>();
+  /** Teto por loja: a caixa e um mural de operacao, nao um arquivo historico. */
+  readonly #maxPerStore = 2_000;
+
+  async append(notification: Notification): Promise<void> {
+    const list = this.#byStore.get(notification.storeId) ?? [];
+    list.push(clone(notification));
+    if (list.length > this.#maxPerStore) list.shift();
+    this.#byStore.set(notification.storeId, list);
+  }
+
+  async forStore(query: NotificationQuery): Promise<Notification[]> {
+    const list = this.#byStore.get(query.storeId) ?? [];
+    return list
+      .filter((notification) => query.unreadOnly !== true || notification.readAt === null)
+      .slice(-(query.limit ?? 50))
+      .reverse()
+      .map(clone);
+  }
+
+  async markRead(id: string, storeId: StoreId, at: Instant): Promise<Notification | undefined> {
+    const list = this.#byStore.get(storeId);
+    if (list === undefined) return undefined;
+
+    const index = list.findIndex((notification) => notification.id === id);
+    if (index === -1) return undefined;
+
+    const current = list[index] as Notification;
+    // Idempotente: reler algo ja lido nao muda o instante da primeira leitura.
+    const updated: Notification = current.readAt === null ? { ...current, readAt: at } : current;
+    list[index] = updated;
+    return clone(updated);
+  }
+
+  async unreadCount(storeId: StoreId): Promise<number> {
+    return (this.#byStore.get(storeId) ?? []).filter((n) => n.readAt === null).length;
+  }
+}
+
 export function createInMemoryRepositories(): Repositories {
   return {
     stores: new InMemoryStoreRepository(),
@@ -439,5 +494,6 @@ export function createInMemoryRepositories(): Repositories {
     deals: new InMemoryDealRepository(),
     shareLinks: new InMemoryShareLinkRepository(),
     audit: new InMemoryAuditRepository(),
+    notifications: new InMemoryNotificationRepository(),
   };
 }

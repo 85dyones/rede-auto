@@ -475,6 +475,58 @@ dona), `FLAGGED_ON_EXTENDED_CUSTODY` (está com terceiro — decisão humana),
 
 `400 XML_DOCTYPE_REJECTED` para qualquer XML com DTD.
 
+### `GET /api/v1/notificacoes?naoLidas=true&limite=50`
+
+Mural de avisos da sua loja. É o que fecha o laço do produto: sem ele, a trava
+que expira às 22h só seria descoberta por quem abrisse a tela no dia seguinte.
+
+```jsonc
+{
+  "naoLidas": 3,
+  "avisos": [
+    {
+      "id": "aud_0042",
+      "tipo": "vehicle.available_again",
+      "urgencia": "INFO",
+      "titulo": "Veículo disponível novamente",
+      "texto": "Um veículo voltou a ficar disponível na rede e está no pátio de uma loja parceira — pronto para apresentação imediata.",
+      "agregadoId": "veh_0001",
+      "ocorridoEm": "2026-08-24T22:00:00.000Z",
+      "lidoEm": null
+    }
+  ]
+}
+```
+
+`urgencia`: `INFO` (uma oportunidade apareceu), `ACTION_REQUIRED` (alguém precisa
+agir, com prazo correndo) ou `ALERT` (prazo estourado ou inconsistência).
+
+Quem recebe o quê:
+
+| Evento | Vai para | Urgência |
+|---|---|---|
+| `vehicle.available_again` | toda a rede ativa | INFO |
+| `feed.vehicle_created` | toda a rede, menos quem publicou | INFO |
+| `recall.requested` | loja custodiante | ACTION_REQUIRED |
+| `recall.sla_started` | loja custodiante | ACTION_REQUIRED |
+| `recall.sla_breached` | custodiante e proprietária | ALERT |
+| `recall.superseded_by_sale` | loja proprietária | INFO |
+| `deal.confirmed` / `deal.settled` | loja proprietária | ACTION_REQUIRED / INFO |
+| `deal.trade_in_acceptance_requested` | loja proprietária | ACTION_REQUIRED |
+| `custody.discrepancies_found` | origem e destino | ALERT |
+| `feed.duplicate_vin_detected` | as duas lojas envolvidas | ALERT |
+| `feed.vehicle_missing` (com terceiro) | proprietária e custodiante | ACTION_REQUIRED |
+| `membership.application_opened` | fundadoras, menos a padrinho | ACTION_REQUIRED |
+| `network.store_admitted` | toda a rede | INFO |
+
+`lock.opened`, `lock.extended` e as mudanças de preço **não** notificam: virariam
+ruído e afogariam os avisos que exigem ação.
+
+### `POST /api/v1/notificacoes/:id/lida`
+
+Marca um aviso como lido. Idempotente — reler não muda o instante da primeira
+leitura. Uma loja só enxerga e marca a própria caixa.
+
 ### `GET /api/v1/auditoria?agregadoId=&limite=`
 
 Trilha derivada dos eventos de domínio: tipo, agregado, instante, loja e usuário
