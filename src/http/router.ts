@@ -49,16 +49,30 @@ export class Router {
     return this.add('DELETE', pattern, handler, options);
   }
 
+  /**
+   * Casa a rota mais ESPECIFICA, nao a registrada primeiro.
+   *
+   * `/veiculos/meus` e `/veiculos/:id` casam com o mesmo caminho. Depender da
+   * ordem de registro funciona ate alguem inserir uma rota literal depois da
+   * parametrizada — e o defeito aparece como um 404 estranho em producao, nao
+   * como erro de compilacao. Contar segmentos literais resolve de vez.
+   */
   match(method: string, path: string): RouteMatch | null {
     const segments = splitPath(path);
+    let best: { route: Route; params: Record<string, string>; score: number } | null = null;
 
     for (const route of this.#routes) {
       if (route.method !== method) continue;
       const params = matchSegments(route.segments, segments);
       if (params === null) continue;
-      return { handler: route.handler, params, isPublic: route.public };
+
+      const score = literalSegmentCount(route.segments);
+      if (best === null || score > best.score) best = { route, params, score };
     }
-    return null;
+
+    return best === null
+      ? null
+      : { handler: best.route.handler, params: best.params, isPublic: best.route.public };
   }
 
   /** Metodos aceitos neste caminho — alimenta o 405 e o cabecalho Allow. */
@@ -78,6 +92,10 @@ export class Router {
       public: route.public,
     }));
   }
+}
+
+function literalSegmentCount(segments: readonly string[]): number {
+  return segments.filter((segment) => !segment.startsWith(':')).length;
 }
 
 function splitPath(path: string): string[] {

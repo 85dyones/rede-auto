@@ -305,11 +305,15 @@ typecheck estrito (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,
 O que um piloto com lojas reais exigiria antes de rodar, e está fora do que foi
 entregue aqui:
 
-- **persistência real.** Os repositórios são portas assíncronas com adaptador em
-  memória. Trocar por Postgres não deve encostar em nenhum serviço, mas exige
-  transação explícita onde hoje o processo single-threaded garante atomicidade —
-  em especial no par veículo + trava, e na confirmação da venda, que mexe em
-  três agregados.
+- **persistência real, e o índice que impede a venda duplicada.** Os
+  repositórios são portas assíncronas com adaptador em memória. Trocar por
+  Postgres não deve encostar em nenhum serviço, mas a atomicidade que hoje vem
+  de graça do processo single-threaded precisa virar explícita. O item crítico é
+  um **índice único parcial** em `(vehicle_id) WHERE status = 'ACTIVE'` na
+  tabela de travas: sem ele, duas lojas podem ler `AVAILABLE` ao mesmo tempo e
+  ambas travar — que é precisamente o problema que a plataforma existe para
+  eliminar. Detalhes e os outros três pontos de corrida em
+  [`decisoes.md`](docs/decisoes.md#17-concorrência-o-que-muda-quando-sair-da-memória).
 - **autenticação de produção.** A chave de API é adaptador de desenvolvimento:
   falta rotação, revogação, escopo por chave (uma chave de integração de feed
   não deveria poder fechar venda) e limite de requisições.

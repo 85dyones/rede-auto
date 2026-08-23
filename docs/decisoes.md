@@ -252,7 +252,34 @@ negócio — que é onde a ambiguidade custa caro — fica ancorado no
 
 ---
 
-## 17. O que ficou de fora, e por quê
+## 17. Concorrência: o que muda quando sair da memória
+
+O adaptador atual é em memória e o processo é single-threaded, então **duas
+tentativas de travar o mesmo carro nunca se cruzam**. Isso é uma propriedade do
+adaptador, não do domínio — e é exatamente a propriedade que reintroduziria a
+venda duplicada se fosse perdida sem substituição.
+
+Onde a corrida existe, em ordem de gravidade:
+
+| Operação | O que pode acontecer | O que resolve |
+|---|---|---|
+| `openLock` | duas lojas leem `AVAILABLE` e ambas travam | índice único parcial em `(vehicle_id) WHERE status = 'ACTIVE'` na tabela de travas |
+| `confirmDealSale` | negociação, trava e recall mudam em três escritas | uma transação envolvendo os três |
+| `checkIn` | dois check-ins do mesmo termo | `UPDATE … WHERE status = 'OPEN'` e conferir as linhas afetadas |
+| `registerSettlement` | duas parcelas simultâneas estourando o saldo | recalcular o saldo dentro da transação, com `SELECT … FOR UPDATE` no deal |
+
+O índice único é o mais importante: ele transforma a corrida numa violação de
+constraint, que o serviço traduz para o mesmo `409 VEHICLE_ALREADY_LOCKED` que
+já existe. O domínio não muda — a checagem em `openLock` continua sendo a
+primeira linha de defesa e a que produz a mensagem boa.
+
+O desenho já facilita isso: as funções de domínio são puras e devolvem o estado
+novo sem persistir, então envolver "carregar → decidir → salvar" numa transação
+é trabalho do serviço de aplicação, não uma reescrita.
+
+---
+
+## 18. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|
