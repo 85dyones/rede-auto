@@ -23,8 +23,14 @@ export type BusinessCalendar = {
   readonly timeZone: string;
   /** Dias uteis: 0 = domingo ... 6 = sabado. */
   readonly workdays: readonly number[];
-  /** Janelas de expediente dentro de um dia util, em ordem crescente. */
+  /** Janelas de expediente padrao de um dia util, em ordem crescente. */
   readonly windows: readonly TimeWindow[];
+  /**
+   * Janelas especificas por dia da semana, sobrepondo `windows`.
+   * Existe porque loja de seminovos abre sabado, mas em horario reduzido —
+   * e tratar sabado como dia util inteiro inflaria todo prazo pedido na sexta.
+   */
+  readonly windowsByWeekday?: Readonly<Partial<Record<number, readonly TimeWindow[]>>>;
   /** Datas nao uteis no formato `YYYY-MM-DD` (data local). */
   readonly holidays: ReadonlySet<string>;
 };
@@ -47,11 +53,14 @@ function parseHourMinute(value: string): number {
  * fuso de Sao Paulo. Lojas de seminovos abrem sabado, e ignorar isso inflaria
  * artificialmente todo prazo pedido numa sexta a tarde.
  */
-export function defaultBusinessCalendar(years: readonly number[] = defaultHolidayYears()): BusinessCalendar {
+export function defaultBusinessCalendar(
+  years: readonly number[] = defaultHolidayYears(),
+): BusinessCalendar {
   return {
     timeZone: 'America/Sao_Paulo',
     workdays: [1, 2, 3, 4, 5, 6],
     windows: [timeWindow('08:00', '18:00')],
+    windowsByWeekday: { 6: [timeWindow('09:00', '13:00')] },
     holidays: brazilianNationalHolidays(years),
   };
 }
@@ -61,23 +70,11 @@ function defaultHolidayYears(): number[] {
   return [current - 1, current, current + 1, current + 2];
 }
 
-/**
- * Sabado tem janela mais curta. Modelado como calendario proprio porque
- * `windows` e global ao calendario; a rede pode sobrescrever no config.
- */
-export function withSaturdayWindow(
+export function windowsForWeekday(
   calendar: BusinessCalendar,
-  saturday: TimeWindow,
-): BusinessCalendar & { readonly saturdayWindow: TimeWindow } {
-  return { ...calendar, saturdayWindow: saturday };
-}
-
-function windowsForWeekday(calendar: BusinessCalendar, weekday: number): readonly TimeWindow[] {
-  const withSaturday = calendar as BusinessCalendar & { saturdayWindow?: TimeWindow };
-  if (weekday === 6 && withSaturday.saturdayWindow !== undefined) {
-    return [withSaturday.saturdayWindow];
-  }
-  return calendar.windows;
+  weekday: number,
+): readonly TimeWindow[] {
+  return calendar.windowsByWeekday?.[weekday] ?? calendar.windows;
 }
 
 // ---------------------------------------------------------------------------

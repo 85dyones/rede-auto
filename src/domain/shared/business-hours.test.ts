@@ -87,11 +87,11 @@ describe('addBusinessHours', () => {
   });
 
   test('sabado com janela propria e respeitado', () => {
-    const withSaturday = {
+    const withSaturday: BusinessCalendar = {
       ...weekdaysOnly,
       workdays: [1, 2, 3, 4, 5, 6],
-      saturdayWindow: timeWindow('09:00', '13:00'),
-    } as BusinessCalendar;
+      windowsByWeekday: { 6: [timeWindow('09:00', '13:00')] },
+    };
     // Sexta 17:00: 1h sexta + 3h sabado (09:00-12:00) -> sabado 12:00.
     assert.equal(localOf(addBusinessHours(at('2026-08-21T20:00:00Z'), 4, withSaturday)), '2026-08-22 12:00');
   });
