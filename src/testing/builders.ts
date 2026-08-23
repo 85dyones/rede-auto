@@ -263,3 +263,65 @@ export function atYardOf(vehicle: Vehicle, custodianStoreId: StoreId, since = 0)
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Termos de vistoria
+// ---------------------------------------------------------------------------
+
+import {
+  type InspectionTerm,
+  type InspectionTermContent,
+  type Signer,
+  PhotoAngle,
+  REQUIRED_PHOTO_ANGLES,
+  sealTerm,
+} from '../domain/custody/custody.ts';
+import { unwrap as unwrapResult } from '../domain/shared/result.ts';
+
+/** Conjunto minimo de fotos que satisfaz `REQUIRED_PHOTO_ANGLES`. */
+export function buildTermPhotos(extra: readonly PhotoAngle[] = []): Array<{ angle: PhotoAngle; url: string }> {
+  return [...REQUIRED_PHOTO_ANGLES, ...extra].map((angle) => ({
+    angle,
+    url: `https://cdn.exemplo.com/vistoria/${angle.toLowerCase()}.jpg`,
+  }));
+}
+
+export function buildTermContent(
+  overrides: Partial<InspectionTermContent> = {},
+): Record<string, unknown> {
+  return {
+    odometerKm: 38_400,
+    fuelEighths: 4,
+    photos: buildTermPhotos(),
+    damages: [],
+    observations: null,
+    geolocation: null,
+    ...overrides,
+  };
+}
+
+/** CPFs com digito verificador valido, para atravessar a validacao real. */
+const VALID_CPFS = ['52998224725', '11144477735', '39053344705'];
+
+export function buildSigner(storeId: StoreId, overrides: Partial<Signer> = {}): Signer {
+  return {
+    name: 'Roberto Conferente',
+    document: overrides.document ?? (VALID_CPFS[0] as string),
+    role: 'Gerente de patio',
+    userId: overrides.userId ?? asUserId('usr_conf'),
+    ...overrides,
+    storeId,
+  };
+}
+
+/** Termo pronto e assinado. Falha alto se os dados forem invalidos. */
+export function buildSignedTerm(
+  storeId: StoreId,
+  signedAt: number,
+  contentOverrides: Partial<InspectionTermContent> = {},
+  signerOverrides: Partial<Signer> = {},
+): InspectionTerm {
+  return unwrapResult(
+    sealTerm(buildTermContent(contentOverrides), buildSigner(storeId, signerOverrides), signedAt),
+  );
+}
