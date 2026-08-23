@@ -45,6 +45,8 @@ import {
   requestRecall,
   resolvePriority,
 } from '../domain/recall/recall.ts';
+import { type Deal, markDelivered } from '../domain/deal/deal.ts';
+import type { Vehicle } from '../domain/vehicle/vehicle.ts';
 import { type Actor, type AppContext, publish } from './context.ts';
 import { recallNotFound, transferNotFound, vehicleNotFound } from './errors.ts';
 import { loadVehicle } from './inventory-service.ts';
@@ -64,7 +66,7 @@ export async function startCustodyTransfer(
   context: AppContext,
   actor: Actor,
   input: OpenTransferInput,
-): Promise<Result<{ vehicle: unknown; transfer: CustodyTransfer }, DomainError>> {
+): Promise<Result<{ vehicle: Vehicle; transfer: CustodyTransfer }, DomainError>> {
   if (!hasManagerPowers(actor.user)) {
     return err(forbiddenError('MANAGER_ROLE_REQUIRED', 'Somente gerente ou titular assina a saida do veiculo.'));
   }
@@ -187,12 +189,19 @@ export async function abortCustodyTransfer(
   return ok(state.transfer);
 }
 
+/**
+ * Entrega do veiculo ao comprador final.
+ *
+ * Encerra o eixo fisico E marca a entrega na negociacao, na mesma operacao. Sao
+ * o mesmo fato do ponto de vista do lojista, e separar em duas chamadas abriria
+ * um estado sem sentido: negociacao concluida com o carro ainda no patio.
+ */
 export async function deliverVehicleToConsumer(
   context: AppContext,
   actor: Actor,
   vehicleId: VehicleId,
   finalTerm: InspectionTerm,
-): Promise<Result<unknown, DomainError>> {
+): Promise<Result<{ vehicle: Vehicle; deal: Deal | null }, DomainError>> {
   const loaded = await loadVehicle(context, vehicleId);
   if (!loaded.ok) return loaded;
 
@@ -206,7 +215,32 @@ export async function deliverVehicleToConsumer(
 
   await context.repos.vehicles.save(transition.value.state);
   await publish(context, transition.value.events, actor);
-  return ok(transition.value.state);
+
+  const deal = await markOpenDealDelivered(context, actor, vehicleId);
+  return ok({ vehicle: transition.value.state, deal });
+}
+
+async function markOpenDealDelivered(
+  context: AppContext,
+  actor: Actor,
+  vehicleId: VehicleId,
+): Promise<Deal | null> {
+  const deals = await context.repos.deals.byVehicle(vehicleId);
+  const pending = deals.find(
+    (candidate) => candidate.confirmedAt !== null && candidate.deliveredAt === null,
+  );
+  if (pending === undefined) return null;
+
+  const transition = markDelivered({
+    deal: pending,
+    actorStoreId: actor.store.id,
+    now: context.clock.now(),
+  });
+  if (!transition.ok) return pending;
+
+  await context.repos.deals.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+  return transition.value.state;
 }
 
 // ---------------------------------------------------------------------------

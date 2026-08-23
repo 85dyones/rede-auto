@@ -277,6 +277,7 @@ GET    /api/v1/veiculos/:id/custodia/responsavel?em= quem respondia naquela data
 POST   /api/v1/veiculos/:id/recall                   chamada de retorno
 POST   /api/v1/veiculos/:id/negociacao               monta o repasse sobre a trava
 POST   /api/v1/negociacoes/:id/confirmacao           fecha a venda
+POST   /api/v1/veiculos/:id/entrega                  entrega ao comprador (encerra os dois eixos)
 POST   /api/v1/veiculos/:id/compartilhamentos        gera o link white-label
 POST   /api/v1/feeds/sincronizacao                   ingere o XML do integrador
 GET    /s/:token/lamina.pdf                          lâmina em PDF (pública)

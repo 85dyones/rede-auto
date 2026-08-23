@@ -19,7 +19,7 @@ import {
 } from '../../application/custody-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
-import { custodyPeriodDto, recallDto, transferDto } from '../serialize.ts';
+import { custodyPeriodDto, dealDto, recallDto, transferDto } from '../serialize.ts';
 import { asObject, oneOf, optionalText, queryInstant, text } from '../parse.ts';
 import { requireActor } from './support.ts';
 
@@ -115,7 +115,13 @@ export function registerCustodyRoutes(router: Router, context: AppContext): void
       term.value,
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, { entregue: true });
+
+    return json(200, {
+      entregue: true,
+      veiculoId: result.value.vehicle.id,
+      // A entrega fisica ja marca a entrega na negociacao: sao o mesmo fato.
+      negociacao: result.value.deal === null ? null : dealDto(result.value.deal),
+    });
   });
 
   router.get('/api/v1/veiculos/:id/custodia', async (request) => {

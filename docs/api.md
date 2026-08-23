@@ -242,9 +242,20 @@ Libera antes do prazo. Só o detentor; a dona recebe `403 NOT_LOCK_HOLDER`.
 ```
 
 Os cinco ângulos são obrigatórios (`422 REQUIRED_PHOTOS_MISSING` diz quais
-faltam). `finalidade`: `TEST_DRIVE`, `EXTENDED_STOCK`, `RECALL_RETURN`, `OTHER`
-— se houver recall aberto e o destino for a loja proprietária, o termo já nasce
-como `RECALL_RETURN` vinculado a ele.
+faltam).
+
+| `finalidade` | Quando |
+|---|---|
+| `TEST_DRIVE` | apresentação ao cliente na loja de destino |
+| `EXTENDED_STOCK` | exposição continuada no showroom da outra loja |
+| `RECALL_RETURN` | retorno à loja proprietária atendendo a um recall |
+| `SALE_HANDOVER` | movimentação **depois da venda**, para a loja vendedora entregar ao comprador |
+| `OTHER` | demais casos |
+
+Se houver recall aberto e o destino for a loja proprietária, o termo já nasce
+como `RECALL_RETURN` vinculado a ele. Para um veículo já `SOLD`, a única
+finalidade aceita é `SALE_HANDOVER` — o carro pode estar no pátio da dona, e
+quem entrega é quem atendeu o cliente.
 
 Quem assina a saída é a loja que **está** com o carro. O veículo vai para
 `IN_TRANSIT`, mas a responsabilidade civil **continua na origem**.
@@ -256,6 +267,24 @@ avaria e sinistro mudam de mão.
 
 A resposta traz `divergencias` (rodagem acima de 80 km, queda de combustível,
 avaria nova) e `recallCumprido` quando a entrada encerra um recall.
+
+### `POST /api/v1/veiculos/:id/entrega`
+
+Entrega ao comprador final. Corpo igual ao do termo de vistoria, com a vistoria
+de saída definitiva.
+
+Exige venda confirmada e que **quem chama esteja com o carro**. Encerra o eixo
+físico (`DELIVERED_TO_CONSUMER`) e marca a entrega na negociação na mesma
+operação — são o mesmo fato, e separá-los abriria um estado sem sentido:
+negociação concluída com o carro ainda no pátio.
+
+```jsonc
+{ "entregue": true, "veiculoId": "veh_0001", "negociacao": { "situacao": "COMPLETED", … } }
+```
+
+A negociação vai a `COMPLETED` quando dinheiro, documento e carro chegaram ao
+destino — em qualquer ordem. A entrega **não** exige liquidação: na operação
+real a Loja B entrega quando o banco aprova, e o dinheiro cai dias depois.
 
 ### `GET /api/v1/veiculos/:id/custodia/responsavel?em=<ISO>`
 
@@ -375,11 +404,6 @@ Só a **loja proprietária**, em cujo nome o veículo está registrado.
 ```
 
 Exige `SETTLED`. Aceita CPF ou CNPJ, com dígito verificador validado.
-
-### `POST /api/v1/negociacoes/:id/entrega`
-
-Registra a entrega. A ordem entre ATPV-e e entrega não importa; `COMPLETED`
-exige os dois.
 
 ---
 

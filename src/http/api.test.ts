@@ -292,13 +292,69 @@ describe('ciclo completo de um repasse', () => {
     assert.equal(pelaProprietaria.body.atpv.numero, 'ATPV-2026-889231');
   });
 
-  test('a entrega ao comprador conclui a negociacao', async () => {
-    const response = await api<{ situacao: string }>(
+  test('para entregar, a Loja B busca o carro no patio da Loja A', async () => {
+    // O Onix nunca saiu do patio da Prime. Quem atendeu o cliente e quem
+    // entrega, entao o carro precisa chegar ate a Loja B primeiro.
+    const saida = await api<{ termo: { id: string } }>(
       'POST',
-      `/api/v1/negociacoes/${dealId}/entrega`,
-      { key: VELOZ_VENDEDOR },
+      `/api/v1/veiculos/${vehicleId}/custodia/saidas`,
+      {
+        key: PRIME,
+        body: {
+          lojaDestinoId: 'str_veloz',
+          finalidade: 'SALE_HANDOVER',
+          vistoria: vistoria(38_400, 6),
+          responsavel,
+        },
+      },
     );
-    assert.equal(response.body.situacao, 'COMPLETED');
+    assert.equal(saida.status, 201);
+
+    const entrada = await api('POST', `/api/v1/custodia/termos/${saida.body.termo.id}/entrada`, {
+      key: VELOZ,
+      body: { vistoria: vistoria(38_437, 6), responsavel },
+    });
+    assert.equal(entrada.status, 200);
+  });
+
+  test('outra finalidade de movimentacao e bloqueada para veiculo vendido', async () => {
+    const response = await api<{ erro: { codigo: string } }>(
+      'POST',
+      `/api/v1/veiculos/${vehicleId}/custodia/saidas`,
+      {
+        key: VELOZ,
+        body: {
+          lojaDestinoId: 'str_central',
+          finalidade: 'EXTENDED_STOCK',
+          vistoria: vistoria(38_437, 6),
+          responsavel,
+        },
+      },
+    );
+    assert.equal(response.status, 409);
+    assert.equal(response.body.erro.codigo, 'VEHICLE_SOLD');
+  });
+
+  test('a entrega ao comprador encerra o eixo fisico e conclui a negociacao', async () => {
+    const response = await api<{
+      entregue: boolean;
+      negociacao: { situacao: string } | null;
+    }>('POST', `/api/v1/veiculos/${vehicleId}/entrega`, {
+      key: VELOZ,
+      body: { vistoria: vistoria(38_440, 5), responsavel },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.entregue, true);
+    // A entrega fisica e a entrega da negociacao sao o mesmo fato.
+    assert.equal(response.body.negociacao?.situacao, 'COMPLETED');
+
+    const vehicle = await api<{ fisico: { situacao: string } }>(
+      'GET',
+      `/api/v1/veiculos/${vehicleId}`,
+      { key: PRIME },
+    );
+    assert.equal(vehicle.body.fisico.situacao, 'DELIVERED_TO_CONSUMER');
   });
 
   test('a auditoria registrou toda a trajetoria do veiculo', async () => {

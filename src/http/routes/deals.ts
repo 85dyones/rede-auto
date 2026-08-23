@@ -13,7 +13,6 @@ import {
   abandonDeal,
   acceptDealTradeIn,
   confirmDealSale,
-  markDealDelivered,
   registerDealAtpv,
   rejectDealTradeIn,
   settleDeal,
@@ -169,15 +168,6 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
       buyerName: buyerName.value,
       buyerDocument: buyerDocument.value,
     });
-    if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, dealDto(result.value));
-  });
-
-  router.post('/api/v1/negociacoes/:id/entrega', async (request) => {
-    const actor = requireActor(request);
-    if (!actor.ok) return errorResponse(actor.error, request.requestId);
-
-    const result = await markDealDelivered(context, actor.value, asDealId(request.params['id'] as string));
     if (!result.ok) return errorResponse(result.error, request.requestId);
     return json(200, dealDto(result.value));
   });

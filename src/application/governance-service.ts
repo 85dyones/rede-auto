@@ -12,6 +12,7 @@ import { type Result, err, ok } from '../domain/shared/result.ts';
 import type { DomainError } from '../domain/shared/errors.ts';
 import { conflictError } from '../domain/shared/errors.ts';
 import { asApplicationId, asStoreId, type ApplicationId } from '../domain/shared/ids.ts';
+import { domainEvent } from '../domain/shared/events.ts';
 import { type Store, parseStoreProfile } from '../domain/network/store.ts';
 import {
   type MembershipApplication,
@@ -119,16 +120,11 @@ async function admit(
   await context.repos.stores.save(result.value.store);
   await context.repos.memberships.save(result.value.application);
   await publish(context, [
-    {
-      type: 'network.store_admitted',
-      aggregateId: result.value.store.id,
-      occurredAt: context.clock.now(),
-      payload: {
-        applicationId: application.id,
-        tradeName: result.value.store.profile.tradeName,
-        sponsorStoreId: result.value.store.sponsorStoreId,
-      },
-    },
+    domainEvent('network.store_admitted', result.value.store.id, context.clock.now(), {
+      applicationId: application.id,
+      tradeName: result.value.store.profile.tradeName,
+      sponsorStoreId: result.value.store.sponsorStoreId,
+    }),
   ]);
 
   return result.value;

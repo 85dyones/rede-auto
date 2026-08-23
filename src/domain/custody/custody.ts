@@ -388,6 +388,12 @@ export const TransferPurpose = {
   EXTENDED_STOCK: 'EXTENDED_STOCK',
   /** Retorno a loja proprietaria em atendimento a um recall. */
   RECALL_RETURN: 'RECALL_RETURN',
+  /**
+   * Movimentacao depois da venda fechada, para que a loja vendedora entregue o
+   * carro ao comprador. E a unica finalidade aceita para um veiculo VENDIDO:
+   * o carro pode estar no patio da dona e quem entrega e quem atendeu o cliente.
+   */
+  SALE_HANDOVER: 'SALE_HANDOVER',
   OTHER: 'OTHER',
 } as const;
 export type TransferPurpose = (typeof TransferPurpose)[keyof typeof TransferPurpose];
@@ -474,12 +480,15 @@ export function openTransfer(command: OpenTransferCommand): Transition<VehicleWi
       }),
     );
   }
-  if (vehicle.commercialStatus === CommercialStatus.SOLD && command.purpose !== TransferPurpose.OTHER) {
+  if (
+    vehicle.commercialStatus === CommercialStatus.SOLD &&
+    command.purpose !== TransferPurpose.SALE_HANDOVER
+  ) {
     return err(
       conflictError(
         'VEHICLE_SOLD',
-        'Veiculo vendido: a movimentacao seguinte e a entrega ao comprador.',
-        { vehicleId: vehicle.id },
+        'Veiculo vendido: a unica movimentacao aceita e SALE_HANDOVER, para entrega ao comprador.',
+        { vehicleId: vehicle.id, purpose: command.purpose },
       ),
     );
   }

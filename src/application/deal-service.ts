@@ -22,6 +22,8 @@ import type { Instant } from '../domain/shared/clock.ts';
 import type { Money } from '../domain/shared/money.ts';
 import { hasManagerPowers } from '../domain/network/store.ts';
 import { convertLockToDeal, isActive } from '../domain/lock/commercial-lock.ts';
+import { domainEvent } from '../domain/shared/events.ts';
+import { CommercialStatus, isInspectionValid } from '../domain/vehicle/vehicle.ts';
 import {
   type Deal,
   type DealFinancials,
@@ -329,27 +331,32 @@ export async function abandonDeal(
 
 async function returnVehicleToNetwork(context: AppContext, deal: Deal): Promise<void> {
   const vehicle = await context.repos.vehicles.byId(deal.vehicleId);
-  if (vehicle === undefined || vehicle.commercialStatus !== 'SOLD') return;
+  if (vehicle === undefined || vehicle.commercialStatus !== CommercialStatus.SOLD) return;
 
   const at = context.clock.now();
+
+  // Se o laudo venceu enquanto a venda estava em curso, o carro nao volta ao
+  // catalogo — a mesma regra que vale quando uma trava cai.
+  const backToNetwork = isInspectionValid(vehicle.inspection, at);
   await context.repos.vehicles.save({
     ...vehicle,
-    commercialStatus: 'AVAILABLE',
+    commercialStatus: backToNetwork ? CommercialStatus.AVAILABLE : CommercialStatus.DRAFT,
     activeLockId: null,
     updatedAt: at,
   });
+
   await publish(context, [
-    {
-      type: 'vehicle.available_again',
-      aggregateId: vehicle.id,
-      occurredAt: at,
-      payload: {
+    domainEvent(
+      backToNetwork ? 'vehicle.available_again' : 'vehicle.unlisted',
+      vehicle.id,
+      at,
+      {
         reason: 'DEAL_CANCELLED',
         dealId: deal.id,
         custodianStoreId: vehicle.physical.custodianStoreId,
         onExtendedCustody: vehicle.physical.custodianStoreId !== vehicle.ownerStoreId,
       },
-    },
+    ),
   ]);
 }
 

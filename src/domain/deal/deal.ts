@@ -47,7 +47,6 @@ import {
   gte,
   isNegative,
   isPositive,
-  isZero,
   subtract,
   sum,
 } from '../shared/money.ts';
@@ -552,15 +551,6 @@ export function confirmDeal(command: ConfirmDealCommand): Transition<Deal> {
     );
   }
 
-  // Transbordo em que a troca cobre exatamente o liquido ja nasce liquidado.
-  const nothingToPay = isZero(financials.cashDueToOwner);
-  const confirmed: Deal = {
-    ...deal,
-    status: nothingToPay ? DealStatus.SETTLED : DealStatus.CONFIRMED,
-    confirmedAt: now,
-    settledAt: nothingToPay ? now : null,
-  };
-
   const events: DomainEvent[] = [
     domainEvent('deal.confirmed', deal.id, now, {
       vehicleId: deal.vehicleId,
@@ -574,17 +564,11 @@ export function confirmDeal(command: ConfirmDealCommand): Transition<Deal> {
       sellerTotalResultCents: financials.sellerTotalResult.cents,
     }),
   ];
-  if (nothingToPay) {
-    events.push(
-      domainEvent('deal.settled', deal.id, now, {
-        ownerStoreId: deal.ownerStoreId,
-        cashDueToOwnerCents: 0,
-        note: 'O credito da troca cobriu integralmente o liquido.',
-      }),
-    );
-  }
 
-  return transitioned(confirmed, events);
+  // Um transbordo em que a troca cobre exatamente o liquido nao deixa dinheiro
+  // a transferir: `advanceLifecycle` reconhece isso e ja promove a liquidada,
+  // sem caso especial aqui.
+  return advanceLifecycle({ ...deal, status: DealStatus.CONFIRMED, confirmedAt: now }, now, events);
 }
 
 // ---------------------------------------------------------------------------
@@ -663,7 +647,7 @@ export function registerSettlement(command: RegisterSettlementCommand): Transiti
   const withSettlement: Deal = { ...deal, settlements: [...deal.settlements, settlement] };
   const after = computeFinancials(withSettlement);
 
-  const events: DomainEvent[] = [
+  return advanceLifecycle(withSettlement, now, [
     domainEvent('deal.settlement_registered', deal.id, now, {
       settlementId: settlement.id,
       amountCents: settlement.amount.cents,
@@ -671,20 +655,7 @@ export function registerSettlement(command: RegisterSettlementCommand): Transiti
       outstandingCents: after.outstandingAmount.cents,
       ownerStoreId: deal.ownerStoreId,
     }),
-  ];
-
-  if (!after.fullySettled) return transitioned(withSettlement, events);
-
-  events.push(
-    domainEvent('deal.settled', deal.id, now, {
-      ownerStoreId: deal.ownerStoreId,
-      sellingStoreId: deal.sellingStoreId,
-      cashDueToOwnerCents: after.cashDueToOwner.cents,
-      settlementCount: withSettlement.settlements.length,
-    }),
-  );
-
-  return transitioned({ ...withSettlement, status: DealStatus.SETTLED, settledAt: now }, events);
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -751,7 +722,7 @@ export function registerAtpv(command: RegisterAtpvCommand): Transition<Deal> {
     emittedAt: now,
   };
 
-  return completeIfDone({ ...deal, atpv }, now, [
+  return advanceLifecycle({ ...deal, atpv }, now, [
     domainEvent('deal.atpv_registered', deal.id, now, {
       atpvNumber: atpv.atpvNumber,
       buyerDocumentType: atpv.buyerDocumentType,
@@ -766,6 +737,17 @@ export type MarkDeliveredCommand = {
   readonly now: Instant;
 };
 
+/**
+ * Registra a entrega do veiculo ao comprador.
+ *
+ * Exige apenas a venda CONFIRMADA, nao a liquidacao. Na operacao real a Loja B
+ * entrega o carro quando o banco aprova o credito, e o dinheiro cai na conta da
+ * Loja A dias depois — travar a entrega no pagamento bloquearia o fluxo normal
+ * e empurraria a entrega para fora do sistema.
+ *
+ * A negociacao so vai a COMPLETED quando dinheiro, documento e carro chegaram
+ * ao destino; a entrega antecipada apenas preenche uma das tres condicoes.
+ */
 export function markDelivered(command: MarkDeliveredCommand): Transition<Deal> {
   const { deal, now } = command;
 
@@ -778,9 +760,9 @@ export function markDelivered(command: MarkDeliveredCommand): Transition<Deal> {
       ),
     );
   }
-  if (deal.status !== DealStatus.SETTLED && deal.status !== DealStatus.COMPLETED) {
+  if (deal.confirmedAt === null || deal.status === DealStatus.CANCELLED) {
     return err(
-      conflictError('DEAL_NOT_SETTLED', 'Registre a liquidacao antes da entrega.', {
+      conflictError('DEAL_NOT_CONFIRMED', 'Confirme a venda antes de registrar a entrega.', {
         dealId: deal.id,
         status: deal.status,
       }),
@@ -790,24 +772,58 @@ export function markDelivered(command: MarkDeliveredCommand): Transition<Deal> {
     return err(conflictError('DEAL_ALREADY_DELIVERED', 'Entrega ja registrada.', { dealId: deal.id }));
   }
 
-  return completeIfDone({ ...deal, deliveredAt: now }, now, [
-    domainEvent('deal.delivered', deal.id, now, { sellingStoreId: deal.sellingStoreId }),
+  return advanceLifecycle({ ...deal, deliveredAt: now }, now, [
+    domainEvent('deal.delivered', deal.id, now, {
+      sellingStoreId: deal.sellingStoreId,
+      settledBeforeDelivery: deal.status === DealStatus.SETTLED,
+    }),
   ]);
 }
 
-/** A negociacao se encerra quando dinheiro, documento e carro chegaram ao destino. */
-function completeIfDone(deal: Deal, now: Instant, events: DomainEvent[]): Transition<Deal> {
-  if (deal.atpv === null || deal.deliveredAt === null || deal.status === DealStatus.COMPLETED) {
-    return transitioned(deal, events);
+/**
+ * Avanca o ciclo de vida a partir do estado atual.
+ *
+ * Concentra as duas transicoes que dependem de varias condicoes ao mesmo tempo,
+ * em vez de espalhar a checagem por cada comando:
+ *   CONFIRMED -> SETTLED    quando a Loja A recebeu tudo que lhe era devido;
+ *   SETTLED   -> COMPLETED  quando ha tambem ATPV-e emitido e entrega feita.
+ *
+ * As tres coisas (dinheiro, documento, carro) acontecem em ordem variavel na
+ * operacao real, e nenhuma delas sozinha encerra a negociacao.
+ */
+function advanceLifecycle(deal: Deal, now: Instant, events: DomainEvent[]): Transition<Deal> {
+  let current = deal;
+  const emitted = [...events];
+
+  const financials = computeFinancials(current);
+  if (current.status === DealStatus.CONFIRMED && financials.fullySettled) {
+    current = { ...current, status: DealStatus.SETTLED, settledAt: current.settledAt ?? now };
+    emitted.push(
+      domainEvent('deal.settled', current.id, now, {
+        ownerStoreId: current.ownerStoreId,
+        sellingStoreId: current.sellingStoreId,
+        cashDueToOwnerCents: financials.cashDueToOwner.cents,
+        settlementCount: current.settlements.length,
+      }),
+    );
   }
-  return transitioned({ ...deal, status: DealStatus.COMPLETED, completedAt: now }, [
-    ...events,
-    domainEvent('deal.completed', deal.id, now, {
-      vehicleId: deal.vehicleId,
-      ownerStoreId: deal.ownerStoreId,
-      sellingStoreId: deal.sellingStoreId,
-    }),
-  ]);
+
+  if (
+    current.status === DealStatus.SETTLED &&
+    current.atpv !== null &&
+    current.deliveredAt !== null
+  ) {
+    current = { ...current, status: DealStatus.COMPLETED, completedAt: now };
+    emitted.push(
+      domainEvent('deal.completed', current.id, now, {
+        vehicleId: current.vehicleId,
+        ownerStoreId: current.ownerStoreId,
+        sellingStoreId: current.sellingStoreId,
+      }),
+    );
+  }
+
+  return transitioned(current, emitted);
 }
 
 // ---------------------------------------------------------------------------

@@ -28,13 +28,13 @@ import {
   completeCustodyTransfer,
   custodianAt,
   custodyHistory,
+  deliverVehicleToConsumer,
   requestVehicleRecall,
   startCustodyTransfer,
 } from '../src/application/custody-service.ts';
 import {
   acceptDealTradeIn,
   confirmDealSale,
-  markDealDelivered,
   registerDealAtpv,
   settleDeal,
   startDeal,
@@ -422,8 +422,14 @@ const documentado = unwrap(
 diz(`ATPV-e ${documentado.atpv?.atpvNumber} emitido pela ${lojaA.store.profile.tradeName} ao comprador final.`);
 destaque('Quem emite e a dona: a rede compartilha estoque, nao transfere titularidade entre lojistas.');
 
-const concluido = unwrap(await markDealDelivered(context, lojaBVendedor, confirmado.deal.id));
-diz(`Entrega registrada. Negociacao: ${concluido.status}`);
+// O Onix esta no patio da Loja B desde o ato 4, entao ela ja pode entregar.
+const entrega = unwrap(
+  await deliverVehicleToConsumer(context, lojaB, onixId, termo(context, lojaB, 38_470, 4)),
+);
+diz(`Veiculo entregue ao comprador. Situacao fisica: ${entrega.vehicle.physical.state}`);
+destaque(
+  `A entrega fisica e a entrega da negociacao sao o mesmo fato: ${entrega.deal?.status}.`,
+);
 
 // ---------------------------------------------------------------------------
 ato('Chega uma multa. Quem paga?');
