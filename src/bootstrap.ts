@@ -43,6 +43,8 @@ export type BuildOptions = {
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly repositories?: Repositories;
+  /** Semear o estoque de exemplo junto com as lojas. Padrao: sim. */
+  readonly seedVehicles?: boolean;
 };
 
 export async function buildApplication(options: BuildOptions = {}): Promise<Application> {
@@ -59,7 +61,9 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
   const router = buildRouter(context, config);
 
   const seed = config.seedDemoData
-    ? await seedFoundingNetwork(context, apiKeys)
+    ? await seedFoundingNetwork(context, apiKeys, {
+        includeVehicles: options.seedVehicles ?? true,
+      })
     : null;
 
   const server = createHttpServer({

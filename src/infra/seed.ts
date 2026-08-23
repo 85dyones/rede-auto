@@ -128,9 +128,16 @@ const DEMO_VEHICLES = [
   },
 ] as const;
 
+export type SeedOptions = {
+  /** Semear o estoque de exemplo. O roteiro de demonstracao desliga para que
+   *  os veiculos entrem pelo feed XML, como acontece na operacao real. */
+  readonly includeVehicles?: boolean;
+};
+
 export async function seedFoundingNetwork(
   context: AppContext,
   apiKeys: ApiKeyRegistry,
+  options: SeedOptions = {},
 ): Promise<SeedResult> {
   const now = context.clock.now();
   const stores: SeededStore[] = [];
@@ -189,6 +196,8 @@ export async function seedFoundingNetwork(
   }
 
   const vehicles: Vehicle[] = [];
+  if (options.includeVehicles === false) return { stores, vehicles };
+
   for (const [index, spec] of DEMO_VEHICLES.entries()) {
     const owner = stores[spec.ownerIndex];
     if (owner === undefined) continue;
