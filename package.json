@@ -1,0 +1,22 @@
+{
+  "name": "rede-auto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Rede B2B fechada para compartilhamento de estoque e custodia fisica de veiculos seminovos entre lojistas.",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "test:watch": "node --test --watch \"src/**/*.test.ts\"",
+    "start": "node src/main.ts",
+    "demo": "node scripts/demo.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}
