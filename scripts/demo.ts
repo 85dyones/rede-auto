@@ -13,7 +13,10 @@ import { buildApplication } from '../src/bootstrap.ts';
 import { loadConfig } from '../src/config.ts';
 import { FakeClock, DAY, HOUR, toIso } from '../src/domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../src/domain/shared/ids.ts';
-import { format as brl, fromReais } from '../src/domain/shared/money.ts';
+import { type Money, format as brl, fromReais } from '../src/domain/shared/money.ts';
+
+/** Os numeros da vendedora sao anulaveis: ela pode nao registrar o preco. */
+const brlOpt = (value: Money | null): string => (value === null ? 'nao informado' : brl(value));
 import { unwrap } from '../src/domain/shared/result.ts';
 import type { Actor, AppContext } from '../src/application/context.ts';
 import {
@@ -41,8 +44,9 @@ import {
 } from '../src/application/deal-service.ts';
 import { submitApplication, voteOnApplication } from '../src/application/governance-service.ts';
 import { syncStoreFeed } from '../src/application/feed-service.ts';
-import { shareVehicle, resolvePublicSheet } from '../src/application/sharing-service.ts';
+import { downloadMaterial, publishMaterial } from '../src/application/material-service.ts';
 import { sealTerm, TransferPurpose, PhotoAngle } from '../src/domain/custody/custody.ts';
+import { VehicleAngle } from '../src/domain/vehicle/vehicle.ts';
 import { EvidenceType } from '../src/domain/lock/evidence.ts';
 import { RecallReason } from '../src/domain/recall/recall.ts';
 import { SettlementMethod, TradeInDestination } from '../src/domain/deal/deal.ts';
@@ -316,21 +320,45 @@ destaque(
 );
 
 // ---------------------------------------------------------------------------
-ato('A lamina white-label vai para o cliente da Loja B');
+ato('O material de divulgacao vai para o canal da Loja B');
 
-const link = unwrap(
-  await shareVehicle(context, lojaBVendedor, { vehicleId: onixId, displayPrice: fromReais(96_900) }),
+// A plataforma nao tem pagina para o consumidor. O que ela entrega e material
+// neutro, que a parceira republica como se fosse dela.
+unwrap(
+  await publishMaterial(context, lojaA, {
+    vehicleId: onixId,
+    photos: [
+      VehicleAngle.FRONT,
+      VehicleAngle.REAR,
+      VehicleAngle.INTERIOR,
+      VehicleAngle.DASHBOARD,
+    ].map((angle) => ({
+      url: `https://midia.rede-auto.com.br/neutras/${onixId}/${angle.toLowerCase()}.jpg`,
+      angle,
+    })),
+  }),
 );
-diz(`Link: https://rede.exemplo.com.br/s/${link.token.slice(0, 12)}...`);
+diz(`${lojaA.store.profile.tradeName} publicou o conjunto neutro de fotos.`);
 
-const publica = unwrap(await resolvePublicSheet(context, link.token, 'https://rede.exemplo.com.br'));
-diz(`Titulo:        ${publica.sheet.title}`);
-diz(`Preco exibido: ${publica.sheet.price.formatted} (escolhido pela Loja B)`);
-diz(`Apresentado por: ${publica.sheet.presentedBy.tradeName}`);
+const neutro = unwrap(await downloadMaterial(context, lojaBVendedor, { vehicleId: onixId }));
+diz(`Kit baixado pela ${lojaB.store.profile.tradeName} — pronto: ${neutro.readiness.ready}`);
+diz(`Ficha:  ${neutro.sheet.title}`);
+diz(`Fotos:  ${neutro.sheet.photos.length} neutras, servidas por ${neutro.sheet.photos[0]?.url}`);
+diz(`Laudo:  ${neutro.sheet.inspection.label}`);
 destaque(
-  `Nao aparece: nome da ${lojaA.store.profile.tradeName}, CNPJ, preco liquido, chassi, placa nem o dominio das fotos originais.`,
+  `Nao aparece: nome da ${lojaA.store.profile.tradeName}, CNPJ, preco liquido, chassi, placa ` +
+    'nem o dominio das fotos do feed. E a parceira que carimba a propria marca:',
 );
-diz(`Fotos servidas por: ${publica.sheet.photos[0]}`);
+
+const comMarca = unwrap(
+  await downloadMaterial(context, lojaBVendedor, {
+    vehicleId: onixId,
+    withOwnBranding: true,
+    price: fromReais(96_900),
+  }),
+);
+diz(`  ${comMarca.branding?.tradeName} — ${comMarca.branding?.price?.formatted}`);
+diz('  (quem define o liquido e a dona; o preco ao cliente e de quem atende o cliente)');
 
 // ---------------------------------------------------------------------------
 ato('A venda fecha — com transbordo do carro de troca');
@@ -370,17 +398,18 @@ const confirmado = unwrap(await confirmDealSale(context, lojaBVendedor, aceito.d
 const f = confirmado.financials;
 console.log('');
 diz('CONTA DA OPERACAO');
-diz(`  Preco ao consumidor ............... ${brl(f.retailPriceToConsumer)}`);
-diz(`  (-) valor dado na troca ........... ${brl(f.tradeInAllowance)}`);
-diz(`  = dinheiro do cliente/banco ....... ${brl(f.cashFromConsumer)}`);
+diz(`  Preco ao consumidor ............... ${brlOpt(f.sellerPrivate.retailPriceToConsumer)}`);
+diz(`  (-) valor dado na troca ........... ${brlOpt(f.sellerPrivate.tradeInAllowance)}`);
+diz(`  = dinheiro do cliente/banco ....... ${brlOpt(f.sellerPrivate.cashFromConsumer)}`);
 console.log('');
 diz(`  Liquido devido a Loja A ........... ${brl(f.netPriceToOwner)}`);
 diz(`  (-) credito do Argo transbordado .. ${brl(f.tradeInCreditToOwner)}`);
 diz(`  = dinheiro a transferir ........... ${brl(f.cashDueToOwner)}`);
 console.log('');
-diz(`  Margem da Loja B no seminovo ...... ${brl(f.sellerGrossMargin)}`);
-diz(`  Resultado da Loja B na troca ...... ${brl(f.sellerTradeInResult)}`);
-destaque(`Resultado total da Loja B: ${brl(f.sellerTotalResult)}`);
+diz(`  Margem da Loja B no seminovo ...... ${brlOpt(f.sellerPrivate.grossMargin)}`);
+diz(`  Resultado da Loja B na troca ...... ${brlOpt(f.sellerPrivate.tradeInResult)}`);
+destaque(`Resultado total da Loja B: ${brlOpt(f.sellerPrivate.totalResult)}`);
+diz('  (este bloco e privado da Loja B — a Loja A nunca o recebe)');
 
 const recallDepois = await context.repos.recalls.byId(recall.id);
 destaque(

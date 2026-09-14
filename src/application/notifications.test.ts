@@ -90,8 +90,19 @@ describe('mapa de eventos para avisos', () => {
     assert.equal(retiradoSozinho, null, 'retirada rotineira nao vira ruido');
   });
 
+  test('material novo avisa a rede, menos a loja que publicou', () => {
+    const aviso = previewNotification(
+      domainEvent('vehicle.neutral_photos_published', 'veh_1', T0, {
+        ownerStoreId: 'str_a',
+        photoCount: 4,
+      }),
+    );
+    assert.equal(aviso?.severity, NotificationSeverity.INFO);
+    assert.deepEqual(aviso?.except, ['str_a']);
+  });
+
   test('eventos sem interesse operacional nao notificam', () => {
-    for (const type of ['lock.opened', 'lock.extended', 'vehicle.net_price_changed', 'sharing.link_created']) {
+    for (const type of ['lock.opened', 'lock.extended', 'vehicle.net_price_changed', 'deal.opened']) {
       assert.equal(previewNotification(domainEvent(type, 'veh_1', T0, {})), null, type);
     }
   });
@@ -153,7 +164,7 @@ describe('entrega das notificacoes', () => {
         inspection: {
           status: InspectionStatus.APPROVED,
           reportNumber: 'LC-1', provider: 'Cautelar Brasil',
-          issuedAt: T0, expiresAt: T0 + 90 * 24 * HOUR,
+          issuedAt: T0, expiresAt: T0 + 90 * 24 * HOUR, fileUrl: null,
         },
         publicPrice: fromReais(92_900),
         netPrice: fromReais(85_000),
@@ -189,7 +200,7 @@ describe('entrega das notificacoes', () => {
         inspection: {
           status: InspectionStatus.APPROVED,
           reportNumber: 'LC-1', provider: 'Cautelar Brasil',
-          issuedAt: T0, expiresAt: T0 + 90 * 24 * HOUR,
+          issuedAt: T0, expiresAt: T0 + 90 * 24 * HOUR, fileUrl: null,
         },
         publicPrice: fromReais(92_900),
         netPrice: fromReais(85_000),

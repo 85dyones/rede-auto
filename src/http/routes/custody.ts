@@ -120,7 +120,8 @@ export function registerCustodyRoutes(router: Router, context: AppContext): void
       entregue: true,
       veiculoId: result.value.vehicle.id,
       // A entrega fisica ja marca a entrega na negociacao: sao o mesmo fato.
-      negociacao: result.value.deal === null ? null : dealDto(result.value.deal),
+      negociacao:
+        result.value.deal === null ? null : dealDto(result.value.deal, actor.value.store.id),
     });
   });
 

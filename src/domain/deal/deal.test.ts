@@ -17,7 +17,7 @@ import {
   type Deal,
   type TradeIn,
 } from './deal.ts';
-import { fromReais, format } from '../shared/money.ts';
+import { type Money, fromReais, format } from '../shared/money.ts';
 import { HOUR } from '../shared/clock.ts';
 import { asDealId, asLockId, asSettlementId, asVehicleId } from '../shared/ids.ts';
 import { unwrap } from '../shared/result.ts';
@@ -30,6 +30,9 @@ const gerenteA = network.principalAt(0);
 const vendedorB = network.principalAt(1);
 
 const T0 = Date.parse('2026-08-24T13:00:00Z');
+
+/** Os numeros da vendedora sao anulaveis: ela pode nao registrar o preco. */
+const brl = (value: Money | null): string => (value === null ? 'nao informado' : format(value));
 
 const NET = fromReais(85_000); // liquido exigido pela Loja A
 const RETAIL = fromReais(94_900); // preco que a Loja B pratica
@@ -77,18 +80,18 @@ describe('modelo financeiro do repasse', () => {
     const f = computeFinancials(deal);
 
     assert.equal(format(f.cashDueToOwner), 'R$ 85.000,00');
-    assert.equal(format(f.sellerGrossMargin), 'R$ 9.900,00');
-    assert.equal(format(f.cashFromConsumer), 'R$ 94.900,00');
-    assert.equal(f.sellingBelowNetPrice, false);
+    assert.equal(brl(f.sellerPrivate.grossMargin), 'R$ 9.900,00');
+    assert.equal(brl(f.sellerPrivate.cashFromConsumer), 'R$ 94.900,00');
+    assert.equal(f.sellerPrivate.sellingBelowNetPrice, false);
   });
 
   test('a Loja B pode precificar como quiser — inclusive abaixo do liquido', () => {
     const deal = novaNegociacao({ retailPriceToConsumer: fromReais(82_000) });
     const f = computeFinancials(deal);
 
-    assert.equal(f.sellerGrossMargin.cents, fromReais(-3_000).cents, 'prejuizo no seminovo e permitido');
+    assert.equal(f.sellerPrivate.grossMargin?.cents, fromReais(-3_000).cents, 'prejuizo no seminovo e permitido');
     assert.equal(f.cashDueToOwner.cents, NET.cents, 'a Loja A recebe o liquido de qualquer forma');
-    assert.equal(f.sellingBelowNetPrice, true);
+    assert.equal(f.sellerPrivate.sellingBelowNetPrice, true);
   });
 
   test('venda abaixo do liquido gera evento de sinalizacao', () => {
@@ -131,11 +134,11 @@ describe('cenario padrao: a Loja B absorve o carro de troca', () => {
     const f = computeFinancials(deal);
 
     assert.equal(format(f.cashDueToOwner), 'R$ 85.000,00', 'a troca nao abate nada da Loja A');
-    assert.equal(format(f.cashFromConsumer), 'R$ 52.900,00', '94.900 - 42.000 de troca');
-    assert.equal(format(f.sellerGrossMargin), 'R$ 9.900,00');
+    assert.equal(brl(f.sellerPrivate.cashFromConsumer), 'R$ 52.900,00', '94.900 - 42.000 de troca');
+    assert.equal(brl(f.sellerPrivate.grossMargin), 'R$ 9.900,00');
     // Avaliou o Argo em 46.000 e deu 42.000 ao cliente: 4.000 no giro.
-    assert.equal(format(f.sellerTradeInResult), 'R$ 4.000,00');
-    assert.equal(format(f.sellerTotalResult), 'R$ 13.900,00');
+    assert.equal(brl(f.sellerPrivate.tradeInResult), 'R$ 4.000,00');
+    assert.equal(brl(f.sellerPrivate.totalResult), 'R$ 13.900,00');
   });
 
   test('nao aguarda aceite: a negociacao ja nasce pronta para confirmar', () => {
@@ -195,8 +198,8 @@ describe('cenario de transbordo: a troca vai para a Loja A', () => {
     assert.equal(format(f.cashDueToOwner), 'R$ 45.000,00', '85.000 - 40.000 em veiculo');
     // A Loja B creditou 42.000 ao cliente e a Loja A aceitou por 40.000:
     // 2.000 de prejuizo no giro, compensados pela margem de 9.900.
-    assert.equal(format(f.sellerTradeInResult), '-R$ 2.000,00');
-    assert.equal(format(f.sellerTotalResult), 'R$ 7.900,00');
+    assert.equal(brl(f.sellerPrivate.tradeInResult), '-R$ 2.000,00');
+    assert.equal(brl(f.sellerPrivate.totalResult), 'R$ 7.900,00');
   });
 
   test('a troca nao pode superar o liquido — a Loja A ficaria devendo', () => {
@@ -524,5 +527,86 @@ describe('cancelamento', () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'DEAL_ALREADY_SETTLED');
+  });
+});
+
+describe('o preco ao consumidor e da vendedora, nao da rede', () => {
+  test('a negociacao fecha sem preco ao consumidor registrado', () => {
+    // A venda ao consumidor acontece fora da plataforma: aqui o negocio e o
+    // repasse entre as duas lojas.
+    const deal = unwrap(
+      openDeal({
+        dealId: asDealId('dea_sem_varejo'),
+        vehicleId: asVehicleId('veh_0001'),
+        lockId: asLockId('lck_0001'),
+        ownerStoreId: lojaA.id,
+        sellingStoreId: lojaB.id,
+        createdByUserId: vendedorB.id,
+        netPriceSnapshot: NET,
+        now: T0,
+      }),
+    ).state;
+
+    const f = computeFinancials(deal);
+    assert.equal(f.cashDueToOwner.cents, NET.cents, 'a Loja A recebe o liquido igual');
+    assert.equal(f.sellerPrivate.retailPriceToConsumer, null);
+    assert.equal(f.sellerPrivate.grossMargin, null, 'sem preco nao ha margem a calcular');
+    assert.equal(f.sellerPrivate.sellingBelowNetPrice, false);
+
+    const confirmado = unwrap(confirmDeal({ deal, actorStoreId: lojaB.id, now: T0 + HOUR }));
+    assert.equal(confirmado.state.status, DealStatus.CONFIRMED);
+  });
+
+  test('o preco ao consumidor nunca entra no evento de confirmacao', () => {
+    // O evento alimenta notificacao e auditoria, e a dona le as duas.
+    const confirmado = unwrap(
+      confirmDeal({ deal: novaNegociacao(), actorStoreId: lojaB.id, now: T0 + HOUR }),
+    );
+    const evento = confirmado.events.find((e) => e.type === 'deal.confirmed');
+    assert.ok(evento);
+    assert.equal('retailPriceCents' in evento.payload, false);
+    assert.equal('sellerTotalResultCents' in evento.payload, false);
+    assert.equal(evento.payload['netPriceCents'], NET.cents);
+  });
+
+  test('venda abaixo do liquido e sinalizada sem expor o preco praticado', () => {
+    const opened = unwrap(
+      openDeal({
+        dealId: asDealId('dea_abaixo'),
+        vehicleId: asVehicleId('veh_0001'),
+        lockId: asLockId('lck_0001'),
+        ownerStoreId: lojaA.id,
+        sellingStoreId: lojaB.id,
+        createdByUserId: vendedorB.id,
+        netPriceSnapshot: NET,
+        retailPriceToConsumer: fromReais(80_000),
+        now: T0,
+      }),
+    );
+    const evento = opened.events.find((e) => e.type === 'deal.selling_below_net_price');
+    assert.ok(evento);
+    assert.equal('retailPriceCents' in evento.payload, false);
+  });
+
+  test('o transbordo pendente e marcado como provisorio', () => {
+    // Enquanto a Loja A nao aceita, o credito da troca vale zero porque nada
+    // foi aceito — nao porque a operacao va dar isso.
+    const deal = novaNegociacao({
+      tradeIn: trocaAbsorvida({ destination: TradeInDestination.OWNER_STORE }),
+    });
+    const f = computeFinancials(deal);
+    assert.equal(f.tradeInAcceptancePending, true);
+    assert.equal(f.tradeInCreditToOwner.cents, 0);
+
+    const aceito = unwrap(
+      acceptTradeIn({
+        deal,
+        actorStoreId: lojaA.id,
+        actorUserId: gerenteA.id,
+        acceptedValue: fromReais(40_000),
+        now: T0 + HOUR,
+      }),
+    ).state;
+    assert.equal(computeFinancials(aceito).tradeInAcceptancePending, false);
   });
 });

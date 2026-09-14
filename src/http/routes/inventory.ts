@@ -329,5 +329,7 @@ function parseInspectionBody(input: unknown) {
     provider: typeof raw['empresa'] === 'string' ? raw['empresa'] : null,
     issuedAt: toInstantOrNull(raw['emitidoEm']),
     expiresAt: toInstantOrNull(raw['validoAte']),
+    // O PDF do laudo e o unico documento do carro que circula na rede.
+    fileUrl: typeof raw['arquivoUrl'] === 'string' ? raw['arquivoUrl'] : null,
   };
 }

@@ -11,7 +11,6 @@
 import { type GovernancePolicy, DEFAULT_GOVERNANCE_POLICY } from './domain/network/membership.ts';
 import { type LockPolicy, DEFAULT_LOCK_POLICY } from './domain/lock/evidence.ts';
 import { type CustodyPolicy, DEFAULT_CUSTODY_POLICY } from './domain/custody/custody.ts';
-import { type SharingPolicy, DEFAULT_SHARING_POLICY } from './domain/sharing/share-link.ts';
 import type { RecallPolicy } from './domain/recall/recall.ts';
 import {
   type BusinessCalendar,
@@ -25,7 +24,6 @@ export type NetworkPolicies = {
   readonly lock: LockPolicy;
   readonly recall: RecallPolicy;
   readonly custody: CustodyPolicy;
-  readonly sharing: SharingPolicy;
 };
 
 /**
@@ -54,7 +52,6 @@ export function defaultPolicies(referenceYear?: number): NetworkPolicies {
     lock: DEFAULT_LOCK_POLICY,
     recall: { slaBusinessHours: 4, calendar: defaultCalendar(referenceYear) },
     custody: DEFAULT_CUSTODY_POLICY,
-    sharing: DEFAULT_SHARING_POLICY,
   };
 }
 

@@ -49,7 +49,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
-    return json(201, dealDto(result.value.deal));
+    return json(201, dealDto(result.value.deal, actor.value.store.id));
   });
 
   router.get('/api/v1/negociacoes', async (request) => {
@@ -57,7 +57,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     const deals = await context.repos.deals.byStore(actor.value.store.id);
-    return json(200, { total: deals.length, negociacoes: deals.map(dealDto) });
+    return json(200, { total: deals.length, negociacoes: deals.map((deal) => dealDto(deal, actor.value.store.id)) });
   });
 
   router.get('/api/v1/negociacoes/:id', async (request) => {
@@ -65,13 +65,20 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     const deal = await context.repos.deals.byId(asDealId(request.params['id'] as string));
-    if (deal === undefined) {
+    // Uma negociacao so existe para as duas lojas envolvidas. Para qualquer
+    // outra ela e indistinguivel de inexistente — nem a existencia dela, nem
+    // quem esta negociando o que, sao informacao publica da rede.
+    const visivel =
+      deal !== undefined &&
+      (deal.ownerStoreId === actor.value.store.id || deal.sellingStoreId === actor.value.store.id);
+
+    if (!visivel) {
       return json(404, {
         erro: { codigo: 'DEAL_NOT_FOUND', mensagem: 'Negociacao nao encontrada.' },
         requestId: request.requestId,
       });
     }
-    return json(200, dealDto(deal));
+    return json(200, dealDto(deal, actor.value.store.id));
   });
 
   /** Aceite do transbordo pela loja proprietaria — abate o liquido a receber. */
@@ -92,7 +99,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
       value.value,
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, dealDto(result.value.deal));
+    return json(200, dealDto(result.value.deal, actor.value.store.id));
   });
 
   router.post('/api/v1/negociacoes/:id/troca/recusa', async (request) => {
@@ -107,7 +114,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
       optionalText(body, 'motivo') ?? 'Modelo fora do perfil da loja',
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, dealDto(result.value.deal));
+    return json(200, dealDto(result.value.deal, actor.value.store.id));
   });
 
   /** Fecha a venda: a trava vira venda e o veiculo sai do estoque da rede. */
@@ -117,7 +124,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
 
     const result = await confirmDealSale(context, actor.value, asDealId(request.params['id'] as string));
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, dealDto(result.value.deal));
+    return json(200, dealDto(result.value.deal, actor.value.store.id));
   });
 
   /** Liquidacao da Loja B para a Loja A. Aceita pagamento parcial. */
@@ -144,7 +151,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
       reference: reference.value,
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(201, dealDto(result.value.deal));
+    return json(201, dealDto(result.value.deal, actor.value.store.id));
   });
 
   /** ATPV-e emitido pela loja proprietaria, em cujo nome o veiculo esta. */
@@ -169,7 +176,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
       buyerDocument: buyerDocument.value,
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, dealDto(result.value));
+    return json(200, dealDto(result.value, actor.value.store.id));
   });
 
   router.delete('/api/v1/negociacoes/:id', async (request) => {
@@ -184,7 +191,7 @@ export function registerDealRoutes(router: Router, context: AppContext): void {
       optionalText(body, 'motivo') ?? 'Cliente desistiu',
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, dealDto(result.value));
+    return json(200, dealDto(result.value, actor.value.store.id));
   });
 }
 

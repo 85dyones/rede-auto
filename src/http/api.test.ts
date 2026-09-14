@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 
 import { buildApplication, type Application } from '../bootstrap.ts';
 import { loadConfig } from '../config.ts';
-import { FakeClock, HOUR, DAY } from '../domain/shared/clock.ts';
+import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
 
 /**
@@ -197,7 +197,12 @@ describe('ciclo completo de um repasse', () => {
   });
 
   test('a Loja B monta a negociacao sobre o preco que travou', async () => {
-    const response = await api<{ id: string; financeiro: Record<string, { formatado: string }> }>(
+    const response = await api<{
+      id: string;
+      financeiro: Record<string, { formatado: string }> & {
+        meusNumeros: Record<string, { formatado: string } | null>;
+      };
+    }>(
       'POST',
       `/api/v1/veiculos/${vehicleId}/negociacao`,
       {
@@ -219,9 +224,10 @@ describe('ciclo completo de um repasse', () => {
 
     // Liquido de 85.000 (o travado), venda a 94.900: margem integral da Loja B.
     assert.equal(response.body.financeiro['liquidoDaLojaProprietaria']?.formatado, 'R$ 85.000,00');
-    assert.equal(response.body.financeiro['margemDaVendedora']?.formatado, 'R$ 9.900,00');
     assert.equal(response.body.financeiro['dinheiroDevidoAProprietaria']?.formatado, 'R$ 85.000,00');
-    assert.equal(response.body.financeiro['resultadoTotalDaVendedora']?.formatado, 'R$ 13.900,00');
+    // Os numeros da vendedora vivem num bloco proprio, que a dona nao recebe.
+    assert.equal(response.body.financeiro.meusNumeros['minhaMargem']?.formatado, 'R$ 9.900,00');
+    assert.equal(response.body.financeiro.meusNumeros['resultadoTotal']?.formatado, 'R$ 13.900,00');
   });
 
   test('a Loja A nao fecha a venda no lugar da Loja B', async () => {
@@ -582,82 +588,153 @@ describe('recall represado por trava ativa', () => {
   });
 });
 
-describe('lamina white-label', () => {
-  let token: string;
+describe('material de divulgacao', () => {
+  let vehicleId: string;
 
-  test('a Loja B gera o link com o proprio preco', async () => {
+  test('a plataforma nao expoe nenhuma rota publica', async () => {
+    // Nao ha superficie para o consumidor: toda rota de negocio exige login.
+    for (const path of ['/api/v1/veiculos', '/api/v1/recalls', '/api/v1/notificacoes']) {
+      assert.equal((await api('GET', path)).status, 401, path);
+    }
+  });
+
+  test('a parceira baixa o kit neutro do carro da outra loja', async () => {
     const catalog = await api<{ veiculos: Array<{ id: string }> }>('GET', '/api/v1/veiculos?marca=Toyota', {
       key: VELOZ_VENDEDOR,
     });
-    const vehicleId = catalog.body.veiculos[0]?.id as string;
+    vehicleId = catalog.body.veiculos[0]?.id as string;
 
-    const response = await api<{ url: string; precoExibido: { formatado: string } }>(
-      'POST',
-      `/api/v1/veiculos/${vehicleId}/compartilhamentos`,
-      { key: VELOZ_VENDEDOR, body: { precoExibido: { centavos: 14_490_000 }, validadeHoras: 48 } },
-    );
-    assert.equal(response.status, 201);
-    assert.equal(response.body.precoExibido.formatado, 'R$ 144.900,00');
-    token = response.body.url.split('/s/')[1] as string;
-  });
-
-  test('a lamina publica abre sem autenticacao', async () => {
     const response = await api<{
-      titulo: string;
-      apresentadoPor: { nomeFantasia: string };
-      preco: { formatado: string };
-    }>('GET', `/s/${token}`);
+      referencia: string;
+      prontidao: { pronto: boolean; angulosFaltando: string[] };
+      ficha: { titulo: string };
+      minhaMarca: unknown;
+    }>('GET', `/api/v1/veiculos/${vehicleId}/material`, { key: VELOZ_VENDEDOR });
 
     assert.equal(response.status, 200);
-    assert.equal(response.body.titulo, 'Toyota Corolla 2.0 XEi 2022');
-    assert.equal(response.body.apresentadoPor.nomeFantasia, 'Veloz Seminovos');
-    assert.equal(response.body.preco.formatado, 'R$ 144.900,00');
+    assert.equal(response.body.ficha.titulo, 'Toyota Corolla 2.0 XEi 2022');
+    assert.equal(response.body.minhaMarca, null, 'o kit nasce neutro');
   });
 
-  test('a lamina nao vaza a loja proprietaria, o liquido, o chassi nem a placa', async () => {
-    const response = await api<string>('GET', `/s/${token}/lamina.html`);
-    const html = String(response.body).toLowerCase();
+  test('o kit nao entrega a loja dona, o liquido, o chassi nem a placa', async () => {
+    const response = await api<string>('GET', `/api/v1/veiculos/${vehicleId}/material`, {
+      key: VELOZ_VENDEDOR,
+    });
+    const serialized = JSON.stringify(response.body).toLowerCase();
 
-    for (const proibido of [
-      'garagem central',
-      '34028316000103',
-      '93ybb05654j019381',
-      'pqr2c58',
-      '128.000',
-      '12800000',
-    ]) {
-      assert.equal(html.includes(proibido), false, `vazou na lamina: ${proibido}`);
+    for (const proibido of ['garagem central', '34028316000103', '93ybb05654j019381', 'pqr2c58', '12800000']) {
+      assert.equal(serialized.includes(proibido), false, `vazou no material: ${proibido}`);
     }
-    assert.ok(html.includes('veloz seminovos'));
-    assert.ok(html.includes('noindex'));
   });
 
-  test('a lamina em PDF e um PDF valido e igualmente limpa', async () => {
-    const response = await fetch(`${baseUrl}/s/${token}/lamina.pdf`);
+  test('a parceira carimba a propria marca e o proprio preco', async () => {
+    const response = await api<{ minhaMarca: { nomeFantasia: string; preco: { formatado: string } } }>(
+      'GET',
+      `/api/v1/veiculos/${vehicleId}/material?comMinhaLoja=true&preco=144900`,
+      { key: VELOZ_VENDEDOR },
+    );
+    assert.equal(response.body.minhaMarca.nomeFantasia, 'Veloz Seminovos');
+    assert.equal(response.body.minhaMarca.preco.formatado, 'R$ 144.900,00');
+  });
+
+  test('a ficha em PDF e valida e igualmente limpa', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/veiculos/${vehicleId}/material/ficha.pdf`, {
+      headers: { authorization: `Bearer ${VELOZ_VENDEDOR}` },
+    });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'application/pdf');
 
     const bytes = Buffer.from(await response.arrayBuffer());
     assert.equal(bytes.subarray(0, 8).toString('latin1'), '%PDF-1.7');
-    const text = bytes.toString('latin1').toLowerCase();
-    assert.equal(text.includes('garagem central'), false);
-    assert.ok(text.includes('veloz seminovos'));
+    assert.equal(bytes.toString('latin1').toLowerCase().includes('garagem central'), false);
   });
 
-  test('as fotos passam pelo proxy da plataforma', async () => {
-    const sheet = await api<{ fotos: string[] }>('GET', `/s/${token}`);
-    assert.ok(sheet.body.fotos[0]?.startsWith(`/s/${token}/fotos/`));
+  test('a ficha em PDF exige login como todo o resto', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/veiculos/${vehicleId}/material/ficha.pdf`);
+    assert.equal(response.status, 401);
+  });
 
-    const photo = await fetch(`${baseUrl}/s/${token}/fotos/0`, { redirect: 'manual' });
+  test('as fotos neutras sao servidas pela plataforma', async () => {
+    const photo = await fetch(`${baseUrl}/api/v1/veiculos/${vehicleId}/material/fotos/0`, {
+      headers: { authorization: `Bearer ${VELOZ_VENDEDOR}` },
+      redirect: 'manual',
+    });
     assert.equal(photo.status, 302);
-    assert.match(photo.headers.get('location') ?? '', /^https:\/\/cdn\.central\.com\.br\//);
+    const destino = photo.headers.get('location') ?? '';
+    assert.equal(destino.includes('cdn.central'), false, 'nunca o CDN da loja dona');
   });
 
-  test('link expirado devolve mensagem util ao cliente final', async () => {
-    clock.advance(3 * DAY);
-    const response = await api<{ erro: { mensagem: string } }>('GET', `/s/${token}`);
-    assert.equal(response.status, 409);
-    assert.match(response.body.erro.mensagem, /expirou/);
+  test('o laudo cautelar acompanha o material', async () => {
+    const laudo = await fetch(`${baseUrl}/api/v1/veiculos/${vehicleId}/material/laudo.pdf`, {
+      headers: { authorization: `Bearer ${VELOZ_VENDEDOR}` },
+      redirect: 'manual',
+    });
+    assert.equal(laudo.status, 302);
+    assert.match(laudo.headers.get('location') ?? '', /laudos\.exemplo\.com\.br/);
+  });
+
+  test('so a loja dona publica o conjunto neutro', async () => {
+    const response = await api<{ erro: { codigo: string } }>(
+      'POST',
+      `/api/v1/veiculos/${vehicleId}/material/fotos`,
+      {
+        key: VELOZ,
+        body: { fotos: [{ url: 'https://midia.rede.com.br/a.jpg', angulo: 'FRONT' }] },
+      },
+    );
+    assert.equal(response.status, 403);
+    assert.equal(response.body.erro.codigo, 'NOT_VEHICLE_OWNER');
+  });
+});
+
+describe('a dona nao ve a margem da parceira', () => {
+  let dealId: string;
+
+  test('a Loja B monta uma negociacao com preco ao consumidor', async () => {
+    const catalog = await api<{ veiculos: Array<{ id: string }> }>('GET', '/api/v1/veiculos?marca=Volkswagen', {
+      key: VELOZ_VENDEDOR,
+    });
+    const vehicleId = catalog.body.veiculos[0]?.id as string;
+    await api('POST', `/api/v1/veiculos/${vehicleId}/trava`, { key: VELOZ_VENDEDOR });
+
+    const deal = await api<{ id: string }>('POST', `/api/v1/veiculos/${vehicleId}/negociacao`, {
+      key: VELOZ_VENDEDOR,
+      body: { precoAoConsumidor: { centavos: 12_990_000 } },
+    });
+    assert.equal(deal.status, 201);
+    dealId = deal.body.id;
+  });
+
+  test('a vendedora ve os proprios numeros', async () => {
+    const response = await api<{ financeiro: { meusNumeros?: { minhaMargem: { formatado: string } } } }>(
+      'GET',
+      `/api/v1/negociacoes/${dealId}`,
+      { key: VELOZ_VENDEDOR },
+    );
+    assert.equal(response.status, 200);
+    assert.ok(response.body.financeiro.meusNumeros, 'a vendedora ve a propria margem');
+  });
+
+  test('a dona ve o que lhe e devido, e NADA da margem da parceira', async () => {
+    // Se a dona visse a margem, bastaria olhar uma venda para saber quanto
+    // subir o liquido na proxima — e a parceira pararia de trazer cliente.
+    const response = await api<{ financeiro: Record<string, unknown> }>(
+      'GET',
+      `/api/v1/negociacoes/${dealId}`,
+      { key: 'demo_norte_titular' },
+    );
+    assert.equal(response.status, 200);
+    assert.ok(response.body.financeiro['dinheiroDevidoAProprietaria']);
+    assert.equal('meusNumeros' in response.body.financeiro, false);
+    assert.equal(JSON.stringify(response.body).includes('12990000'), false, 'o preco praticado nao vaza');
+  });
+
+  test('para terceiros a negociacao sequer existe', async () => {
+    const response = await api<{ erro: { codigo: string } }>('GET', `/api/v1/negociacoes/${dealId}`, {
+      key: CENTRAL,
+    });
+    assert.equal(response.status, 404);
+    assert.equal(response.body.erro.codigo, 'DEAL_NOT_FOUND');
   });
 });
 

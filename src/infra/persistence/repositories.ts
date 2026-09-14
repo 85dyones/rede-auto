@@ -14,7 +14,6 @@ import type {
   DealId,
   LockId,
   RecallId,
-  ShareLinkId,
   StoreId,
   UserId,
   VehicleId,
@@ -31,7 +30,6 @@ import type { CustodyTransfer } from '../../domain/custody/custody.ts';
 import type { Recall } from '../../domain/recall/recall.ts';
 import { isOpen as isRecallOpen } from '../../domain/recall/recall.ts';
 import type { Deal } from '../../domain/deal/deal.ts';
-import type { ShareLink } from '../../domain/sharing/share-link.ts';
 import type { Notification } from '../../application/notifications.ts';
 
 export type StoreRepository = {
@@ -110,13 +108,6 @@ export type DealRepository = {
   byStore(storeId: StoreId): Promise<Deal[]>;
 };
 
-export type ShareLinkRepository = {
-  save(link: ShareLink): Promise<void>;
-  byId(id: ShareLinkId): Promise<ShareLink | undefined>;
-  byToken(token: string): Promise<ShareLink | undefined>;
-  byVehicle(vehicleId: VehicleId): Promise<ShareLink[]>;
-};
-
 export type AuditEntry = {
   readonly id: string;
   readonly event: DomainEvent;
@@ -153,7 +144,6 @@ export type Repositories = {
   readonly transfers: CustodyTransferRepository;
   readonly recalls: RecallRepository;
   readonly deals: DealRepository;
-  readonly shareLinks: ShareLinkRepository;
   readonly audit: AuditRepository;
   readonly notifications: NotificationRepository;
 };
@@ -397,30 +387,6 @@ class InMemoryDealRepository implements DealRepository {
   }
 }
 
-class InMemoryShareLinkRepository implements ShareLinkRepository {
-  readonly #byId = new Map<string, ShareLink>();
-  readonly #byToken = new Map<string, string>();
-
-  async save(link: ShareLink): Promise<void> {
-    this.#byId.set(link.id, clone(link));
-    this.#byToken.set(link.token, link.id);
-  }
-  async byId(id: ShareLinkId): Promise<ShareLink | undefined> {
-    const found = this.#byId.get(id);
-    return found === undefined ? undefined : clone(found);
-  }
-  async byToken(token: string): Promise<ShareLink | undefined> {
-    const id = this.#byToken.get(token);
-    return id === undefined ? undefined : this.byId(id as ShareLinkId);
-  }
-  async byVehicle(vehicleId: VehicleId): Promise<ShareLink[]> {
-    return [...this.#byId.values()]
-      .filter((link) => link.vehicleId === vehicleId)
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map(clone);
-  }
-}
-
 class InMemoryAuditRepository implements AuditRepository {
   readonly #entries: AuditEntry[] = [];
   /** Teto de retencao em memoria; um adaptador real escreveria em disco. */
@@ -492,7 +458,6 @@ export function createInMemoryRepositories(): Repositories {
     transfers: new InMemoryCustodyTransferRepository(),
     recalls: new InMemoryRecallRepository(),
     deals: new InMemoryDealRepository(),
-    shareLinks: new InMemoryShareLinkRepository(),
     audit: new InMemoryAuditRepository(),
     notifications: new InMemoryNotificationRepository(),
   };

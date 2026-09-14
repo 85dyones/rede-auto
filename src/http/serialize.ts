@@ -11,6 +11,7 @@
  */
 
 import { formatDuration, toIso, type Instant } from '../domain/shared/clock.ts';
+import type { StoreId } from '../domain/shared/ids.ts';
 import { type Money, format as formatMoney } from '../domain/shared/money.ts';
 import type { Store } from '../domain/network/store.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
@@ -21,10 +22,9 @@ import type { CustodyTransfer, InspectionTerm } from '../domain/custody/custody.
 import type { CustodyPeriod } from '../domain/custody/ledger.ts';
 import type { Recall } from '../domain/recall/recall.ts';
 import { type Deal, type DealFinancials, computeFinancials } from '../domain/deal/deal.ts';
-import type { ShareLink } from '../domain/sharing/share-link.ts';
 import type { VehicleView } from '../application/inventory-service.ts';
 import type { IngestionReport } from '../infra/feeds/ingestion.ts';
-import type { WhiteLabelSheet } from '../domain/sharing/spec-sheet.ts';
+import type { MaterialKit } from '../domain/material/kit.ts';
 
 export const money = (value: Money): { centavos: number; formatado: string } => ({
   centavos: value.cents,
@@ -234,25 +234,45 @@ export function recallDto(recall: Recall) {
   };
 }
 
-export function financialsDto(financials: DealFinancials) {
-  return {
+/**
+ * Numeros da operacao, filtrados por quem esta olhando.
+ *
+ * A loja proprietaria ve o que foi acordado com ela; nunca o preco que a
+ * parceira cobrou do cliente nem a margem dela. Sem esse corte, a dona so
+ * precisaria olhar uma venda para saber quanto subir o liquido na proxima.
+ */
+export function financialsDto(financials: DealFinancials, viewerIsSeller: boolean) {
+  const shared = {
     liquidoDaLojaProprietaria: money(financials.netPriceToOwner),
-    precoAoConsumidor: money(financials.retailPriceToConsumer),
-    valorDadoNaTroca: money(financials.tradeInAllowance),
-    dinheiroDoConsumidor: money(financials.cashFromConsumer),
     creditoDaTrocaParaProprietaria: money(financials.tradeInCreditToOwner),
     dinheiroDevidoAProprietaria: money(financials.cashDueToOwner),
-    margemDaVendedora: money(financials.sellerGrossMargin),
-    resultadoDaVendedoraNaTroca: money(financials.sellerTradeInResult),
-    resultadoTotalDaVendedora: money(financials.sellerTotalResult),
     jaLiquidado: money(financials.settledAmount),
     saldoAberto: money(financials.outstandingAmount),
     liquidado: financials.fullySettled,
-    vendaAbaixoDoLiquido: financials.sellingBelowNetPrice,
+    // Enquanto o transbordo espera aceite, o credito e o resultado sao
+    // provisorios: valem zero porque nada foi aceito ainda.
+    aceiteDaTrocaPendente: financials.tradeInAcceptancePending,
+  };
+
+  if (!viewerIsSeller) return shared;
+
+  const p = financials.sellerPrivate;
+  return {
+    ...shared,
+    meusNumeros: {
+      precoAoConsumidor: p.retailPriceToConsumer === null ? null : money(p.retailPriceToConsumer),
+      valorDadoNaTroca: p.tradeInAllowance === null ? null : money(p.tradeInAllowance),
+      dinheiroDoConsumidor: p.cashFromConsumer === null ? null : money(p.cashFromConsumer),
+      minhaMargem: p.grossMargin === null ? null : money(p.grossMargin),
+      resultadoNaTroca: p.tradeInResult === null ? null : money(p.tradeInResult),
+      resultadoTotal: p.totalResult === null ? null : money(p.totalResult),
+      vendaAbaixoDoLiquido: p.sellingBelowNetPrice,
+    },
   };
 }
 
-export function dealDto(deal: Deal) {
+export function dealDto(deal: Deal, viewerStoreId: StoreId) {
+  const viewerIsSeller = viewerStoreId === deal.sellingStoreId;
   return {
     id: deal.id,
     veiculoId: deal.vehicleId,
@@ -260,7 +280,7 @@ export function dealDto(deal: Deal) {
     lojaProprietariaId: deal.ownerStoreId,
     lojaVendedoraId: deal.sellingStoreId,
     situacao: deal.status,
-    financeiro: financialsDto(computeFinancials(deal)),
+    financeiro: financialsDto(computeFinancials(deal), viewerIsSeller),
     troca: deal.tradeIn === null
       ? null
       : {
@@ -273,8 +293,10 @@ export function dealDto(deal: Deal) {
             km: deal.tradeIn.vehicle.mileageKm,
             cor: deal.tradeIn.vehicle.color,
           },
-          valorDadoAoCliente: money(deal.tradeIn.allowanceToConsumer),
-          avaliacao: money(deal.tradeIn.appraisedValue),
+          // O que a vendedora deu ao cliente e como ela avaliou o usado sao
+          // numeros dela; a dona decide o transbordo pelo proprio criterio.
+          valorDadoAoCliente: viewerIsSeller ? money(deal.tradeIn.allowanceToConsumer) : null,
+          avaliacao: viewerIsSeller ? money(deal.tradeIn.appraisedValue) : null,
           destino: deal.tradeIn.destination,
           aceiteDaProprietaria: deal.tradeIn.ownerAcceptance === null
             ? null
@@ -305,23 +327,6 @@ export function dealDto(deal: Deal) {
     concluidoEm: instant(deal.completedAt),
     canceladoEm: instant(deal.cancelledAt),
     motivoCancelamento: deal.cancelReason,
-  };
-}
-
-export function shareLinkDto(link: ShareLink, publicBaseUrl: string) {
-  return {
-    id: link.id,
-    veiculoId: link.vehicleId,
-    url: `${publicBaseUrl}/s/${link.token}`,
-    urlLamina: `${publicBaseUrl}/s/${link.token}/lamina.html`,
-    urlPdf: `${publicBaseUrl}/s/${link.token}/lamina.pdf`,
-    precoExibido: money(link.displayPrice),
-    exibePlaca: link.showPlate,
-    criadoEm: instant(link.createdAt),
-    expiraEm: instant(link.expiresAt),
-    aberturas: link.viewCount,
-    limiteAberturas: link.maxViews,
-    revogadoEm: instant(link.revokedAt),
   };
 }
 
@@ -386,47 +391,60 @@ export function ingestionReportDto(report: IngestionReport) {
 }
 
 /**
- * Ficha white-label para a rota publica.
+ * Kit de material para a rota autenticada de download.
  *
- * O tipo de dominio `WhiteLabelSheet` ja e o resultado da sanitizacao — aqui so
- * traduzimos os nomes dos campos para o vocabulario do resto da API. Nenhum
- * campo novo entra: se um dia entrar, a lista abaixo tem que mudar junto, que e
- * exatamente o ponto de nao usar spread.
+ * O tipo de dominio ja e o resultado da sanitizacao; aqui so traduzimos os
+ * nomes para o vocabulario do resto da API. Nenhum campo novo entra — se um dia
+ * entrar, esta lista tem que mudar junto, que e o ponto de nao usar spread.
  */
-export function whiteLabelSheetDto(sheet: WhiteLabelSheet) {
+export function materialKitDto(kit: MaterialKit) {
+  const { sheet } = kit;
   return {
+    veiculoId: kit.vehicleId,
     referencia: sheet.reference,
-    titulo: sheet.title,
-    marca: sheet.brand,
-    modelo: sheet.model,
-    versao: sheet.version,
-    anoFabricacao: sheet.manufactureYear,
-    anoModelo: sheet.modelYear,
-    ano: sheet.yearLabel,
-    km: sheet.mileageKm,
-    quilometragem: sheet.mileageLabel,
-    cor: sheet.color,
-    combustivel: sheet.fuelLabel,
-    cambio: sheet.transmissionLabel,
-    portas: sheet.doors,
-    opcionais: sheet.optionals,
-    fotos: sheet.photos,
-    preco: { centavos: sheet.price.cents, formatado: sheet.price.formatted },
+    prontidao: {
+      fotos: kit.readiness.photoCount,
+      angulosFaltando: kit.readiness.missingAngles,
+      temLaudoAnexado: kit.readiness.hasInspectionFile,
+      pronto: kit.readiness.ready,
+    },
+    ficha: {
+      titulo: sheet.title,
+      marca: sheet.brand,
+      modelo: sheet.model,
+      versao: sheet.version,
+      anoFabricacao: sheet.manufactureYear,
+      anoModelo: sheet.modelYear,
+      ano: sheet.yearLabel,
+      km: sheet.mileageKm,
+      quilometragem: sheet.mileageLabel,
+      cor: sheet.color,
+      combustivel: sheet.fuelLabel,
+      cambio: sheet.transmissionLabel,
+      portas: sheet.doors,
+      opcionais: sheet.optionals,
+    },
+    fotos: sheet.photos.map((photo) => ({ url: photo.url, angulo: photo.angleLabel })),
     laudoCautelar: {
       aprovado: sheet.inspection.approved,
       situacao: sheet.inspection.label,
       empresa: sheet.inspection.provider,
       emitidoEm: sheet.inspection.issuedAt,
+      arquivoUrl: sheet.inspection.fileUrl,
     },
-    placa: sheet.plate,
-    apresentadoPor: {
-      nomeFantasia: sheet.presentedBy.tradeName,
-      cidade: sheet.presentedBy.city,
-      uf: sheet.presentedBy.state,
-      telefone: sheet.presentedBy.phone,
-    },
+    minhaMarca:
+      kit.branding === null
+        ? null
+        : {
+            nomeFantasia: kit.branding.tradeName,
+            cidade: kit.branding.city,
+            uf: kit.branding.state,
+            telefone: kit.branding.phone,
+            preco:
+              kit.branding.price === null
+                ? null
+                : { centavos: kit.branding.price.cents, formatado: kit.branding.price.formatted },
+          },
     geradoEm: sheet.generatedAt,
-    validoAte: sheet.validUntil,
-    aviso: sheet.disclaimer,
   };
 }

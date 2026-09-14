@@ -175,6 +175,8 @@ import {
   NO_FEED_SOURCE,
   PhysicalState,
   TransmissionType,
+  VehicleAngle,
+  type NeutralPhoto,
 } from '../domain/vehicle/vehicle.ts';
 import { asVehicleId, type VehicleId } from '../domain/shared/ids.ts';
 import { fromReais } from '../domain/shared/money.ts';
@@ -198,6 +200,17 @@ export function buildSpecs(overrides: Partial<VehicleSpecs> = {}): VehicleSpecs 
   };
 }
 
+/** Conjunto neutro minimo: frente, traseira e interior, como exige o material. */
+export function buildNeutralPhotos(now: number): NeutralPhoto[] {
+  return [VehicleAngle.FRONT, VehicleAngle.REAR, VehicleAngle.INTERIOR, VehicleAngle.DASHBOARD].map(
+    (angle) => ({
+      url: `https://midia.rede-auto.com.br/neutras/${angle.toLowerCase()}.jpg`,
+      angle,
+      publishedAt: now,
+    }),
+  );
+}
+
 export function buildApprovedInspection(now: number, overrides: Partial<InspectionReport> = {}): InspectionReport {
   return {
     status: InspectionStatus.APPROVED,
@@ -205,6 +218,7 @@ export function buildApprovedInspection(now: number, overrides: Partial<Inspecti
     provider: 'Cautelar Brasil',
     issuedAt: now - 7 * DAY,
     expiresAt: now + 83 * DAY,
+    fileUrl: 'https://laudos.exemplo.com.br/LC-2026-004512.pdf',
     ...overrides,
   };
 }
@@ -228,6 +242,7 @@ export function buildVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     chassis: overrides.chassis ?? `9BWZZZ377VT${String(100000 + vehicleCounter).slice(0, 6)}`,
     specs: overrides.specs ?? buildSpecs(),
     inspection: overrides.inspection ?? buildApprovedInspection(now),
+    neutralPhotos: overrides.neutralPhotos ?? buildNeutralPhotos(now),
     pricing: overrides.pricing ?? {
       publicPrice: fromReais(92_900),
       netPrice: fromReais(85_000),

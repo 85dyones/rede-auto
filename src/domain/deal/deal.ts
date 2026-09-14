@@ -141,8 +141,16 @@ export type Deal = {
   readonly sellingStoreId: StoreId;
   /** Liquido congelado na trava. Nao muda depois de aberta a negociacao. */
   readonly netPriceToOwner: Money;
-  /** Preco ao consumidor. Autonomia total da loja vendedora. */
-  readonly retailPriceToConsumer: Money;
+  /**
+   * Preco ao consumidor, quando a vendedora escolhe registra-lo.
+   *
+   * E OPCIONAL porque a venda ao consumidor acontece fora da plataforma, no
+   * canal da propria vendedora. Aqui dentro o negocio e entre as duas lojas: a
+   * dona define o liquido, a vendedora paga o liquido. Quanto ela cobrou do
+   * cliente e informacao dela — util para os proprios numeros, invisivel para a
+   * dona (ver `sellerPrivate` em DealFinancials).
+   */
+  readonly retailPriceToConsumer: Money | null;
   readonly tradeIn: TradeIn | null;
   readonly status: DealStatus;
   readonly createdAt: Instant;
@@ -161,31 +169,46 @@ export type Deal = {
 // Calculo financeiro
 // ---------------------------------------------------------------------------
 
+/**
+ * Numeros da operacao, separados por quem tem direito de ve-los.
+ *
+ * O bloco `sellerPrivate` nunca chega a loja proprietaria. Numa rede de
+ * concorrentes que dividem estoque, a dona ver a margem da parceira destroi o
+ * modelo: basta ela subir o liquido no proximo carro ate a margem sumir, e o
+ * incentivo para a parceira trazer clientes acaba junto.
+ */
 export type DealFinancials = {
+  /** Visivel as duas lojas: e o acordo entre elas. */
   readonly netPriceToOwner: Money;
-  readonly retailPriceToConsumer: Money;
-  readonly tradeInAllowance: Money;
-  /** O que o cliente paga em dinheiro/banco, ja abatida a troca. */
-  readonly cashFromConsumer: Money;
-  /** Credito da troca no transbordo; zero no cenario padrao. */
   readonly tradeInCreditToOwner: Money;
-  /** O que a Loja B efetivamente transfere a Loja A. */
   readonly cashDueToOwner: Money;
-  /** Excedente sobre o liquido: 100% da Loja B. */
-  readonly sellerGrossMargin: Money;
-  /** Resultado do giro da troca para a Loja B. */
-  readonly sellerTradeInResult: Money;
-  readonly sellerTotalResult: Money;
   readonly settledAmount: Money;
   readonly outstandingAmount: Money;
   readonly fullySettled: boolean;
-  /** A Loja B optou por vender abaixo do liquido. Permitido, mas sinalizado. */
-  readonly sellingBelowNetPrice: boolean;
+
+  /** Somente a loja vendedora. `null` quando ela nao registrou o preco. */
+  readonly sellerPrivate: {
+    readonly retailPriceToConsumer: Money | null;
+    readonly tradeInAllowance: Money | null;
+    readonly cashFromConsumer: Money | null;
+    readonly grossMargin: Money | null;
+    readonly tradeInResult: Money | null;
+    readonly totalResult: Money | null;
+    readonly sellingBelowNetPrice: boolean;
+  };
+
+  /**
+   * O transbordo ainda espera o aceite da dona, entao o credito da troca e o
+   * resultado da vendedora sao PROVISORIOS — hoje valem zero porque nada foi
+   * aceito, nao porque a operacao va dar isso.
+   */
+  readonly tradeInAcceptancePending: boolean;
 };
 
 export function computeFinancials(deal: Deal): DealFinancials {
   const tradeIn = deal.tradeIn;
-  const allowance = tradeIn?.allowanceToConsumer ?? ZERO;
+  const retail = deal.retailPriceToConsumer;
+  const allowance = tradeIn?.allowanceToConsumer ?? null;
 
   const isTransbordo = tradeIn !== null && tradeIn.destination === TradeInDestination.OWNER_STORE;
   const tradeInCreditToOwner = isTransbordo
@@ -193,36 +216,45 @@ export function computeFinancials(deal: Deal): DealFinancials {
     : ZERO;
 
   const cashDueToOwner = subtract(deal.netPriceToOwner, tradeInCreditToOwner);
-  const cashFromConsumer = subtract(deal.retailPriceToConsumer, allowance);
-  const sellerGrossMargin = subtract(deal.retailPriceToConsumer, deal.netPriceToOwner);
-
-  // No cenario padrao a Loja B fica com o carro: ganha a diferenca entre o que
-  // ele vale e o que ela creditou. No transbordo, ganha a diferenca entre o que
-  // a Loja A aceitou e o que ela creditou.
-  const tradeInValueToSeller = tradeIn === null
-    ? ZERO
-    : isTransbordo
-      ? tradeInCreditToOwner
-      : tradeIn.appraisedValue;
-  const sellerTradeInResult = tradeIn === null ? ZERO : subtract(tradeInValueToSeller, allowance);
-
   const settledAmount = sum(deal.settlements.map((settlement) => settlement.amount));
   const outstandingAmount = subtract(cashDueToOwner, settledAmount);
 
+  // No cenario padrao a Loja B fica com o carro: ganha a diferenca entre o que
+  // ele vale e o que ela creditou. No transbordo, entre o que a Loja A aceitou
+  // e o que ela creditou.
+  const tradeInValueToSeller = tradeIn === null
+    ? null
+    : isTransbordo
+      ? tradeInCreditToOwner
+      : tradeIn.appraisedValue;
+  const tradeInResult =
+    tradeIn === null || allowance === null || tradeInValueToSeller === null
+      ? null
+      : subtract(tradeInValueToSeller, allowance);
+
+  const grossMargin = retail === null ? null : subtract(retail, deal.netPriceToOwner);
+  const cashFromConsumer =
+    retail === null ? null : subtract(retail, allowance ?? ZERO);
+  const totalResult =
+    grossMargin === null ? null : add(grossMargin, tradeInResult ?? ZERO);
+
   return {
     netPriceToOwner: deal.netPriceToOwner,
-    retailPriceToConsumer: deal.retailPriceToConsumer,
-    tradeInAllowance: allowance,
-    cashFromConsumer,
     tradeInCreditToOwner,
     cashDueToOwner,
-    sellerGrossMargin,
-    sellerTradeInResult,
-    sellerTotalResult: add(sellerGrossMargin, sellerTradeInResult),
     settledAmount,
     outstandingAmount: isNegative(outstandingAmount) ? ZERO : outstandingAmount,
     fullySettled: gte(settledAmount, cashDueToOwner),
-    sellingBelowNetPrice: gt(deal.netPriceToOwner, deal.retailPriceToConsumer),
+    sellerPrivate: {
+      retailPriceToConsumer: retail,
+      tradeInAllowance: allowance,
+      cashFromConsumer,
+      grossMargin,
+      tradeInResult,
+      totalResult,
+      sellingBelowNetPrice: retail !== null && gt(deal.netPriceToOwner, retail),
+    },
+    tradeInAcceptancePending: deal.status === DealStatus.AWAITING_TRADE_IN_ACCEPTANCE,
   };
 }
 
@@ -239,7 +271,8 @@ export type OpenDealCommand = {
   readonly createdByUserId: UserId;
   /** Preco liquido congelado na trava — a fonte da verdade do valor. */
   readonly netPriceSnapshot: Money;
-  readonly retailPriceToConsumer: Money;
+  /** Opcional: a venda ao consumidor acontece fora da plataforma. */
+  readonly retailPriceToConsumer?: Money | null;
   readonly tradeIn?: TradeIn | null;
   readonly now: Instant;
 };
@@ -254,9 +287,10 @@ export function openDeal(command: OpenDealCommand): Transition<Deal> {
       ),
     );
   }
-  if (!isPositive(command.retailPriceToConsumer)) {
+  const retail = command.retailPriceToConsumer ?? null;
+  if (retail !== null && !isPositive(retail)) {
     return err(
-      validationError('RETAIL_PRICE_REQUIRED', 'Informe o preco de venda ao consumidor final.'),
+      validationError('RETAIL_PRICE_INVALID', 'O preco de venda ao consumidor deve ser positivo.'),
     );
   }
   if (!isPositive(command.netPriceSnapshot)) {
@@ -265,7 +299,7 @@ export function openDeal(command: OpenDealCommand): Transition<Deal> {
 
   const tradeIn = command.tradeIn ?? null;
   if (tradeIn !== null) {
-    const check = validateTradeIn(tradeIn, command.retailPriceToConsumer, command.netPriceSnapshot);
+    const check = validateTradeIn(tradeIn, retail, command.netPriceSnapshot);
     if (!check.ok) return check;
   }
 
@@ -281,7 +315,7 @@ export function openDeal(command: OpenDealCommand): Transition<Deal> {
     ownerStoreId: command.ownerStoreId,
     sellingStoreId: command.sellingStoreId,
     netPriceToOwner: command.netPriceSnapshot,
-    retailPriceToConsumer: command.retailPriceToConsumer,
+    retailPriceToConsumer: retail,
     tradeIn,
     status: needsAcceptance ? DealStatus.AWAITING_TRADE_IN_ACCEPTANCE : DealStatus.DRAFT,
     createdAt: command.now,
@@ -303,20 +337,19 @@ export function openDeal(command: OpenDealCommand): Transition<Deal> {
       ownerStoreId: deal.ownerStoreId,
       sellingStoreId: deal.sellingStoreId,
       netPriceCents: deal.netPriceToOwner.cents,
-      retailPriceCents: deal.retailPriceToConsumer.cents,
       tradeInDestination: tradeIn?.destination ?? null,
       status: deal.status,
     }),
   ];
 
-  if (financials.sellingBelowNetPrice) {
+  if (financials.sellerPrivate.sellingBelowNetPrice) {
     // Nao e erro: a Loja B tem autonomia e pode aceitar prejuizo no seminovo
     // para ganhar no giro da troca. Mas fica registrado.
     events.push(
+      // Evento privado da vendedora: a dona nao e notificada disso.
       domainEvent('deal.selling_below_net_price', deal.id, command.now, {
-        netPriceCents: deal.netPriceToOwner.cents,
-        retailPriceCents: deal.retailPriceToConsumer.cents,
-        marginCents: financials.sellerGrossMargin.cents,
+        sellingStoreId: deal.sellingStoreId,
+        marginCents: financials.sellerPrivate.grossMargin?.cents ?? null,
       }),
     );
   }
@@ -335,13 +368,13 @@ export function openDeal(command: OpenDealCommand): Transition<Deal> {
 
 function validateTradeIn(
   tradeIn: TradeIn,
-  retailPrice: Money,
+  retailPrice: Money | null,
   netPrice: Money,
 ): Result<true, DomainError> {
   if (isNegative(tradeIn.allowanceToConsumer) || isNegative(tradeIn.appraisedValue)) {
     return err(validationError('TRADE_IN_NEGATIVE_VALUE', 'Valores da troca nao podem ser negativos.'));
   }
-  if (gt(tradeIn.allowanceToConsumer, retailPrice)) {
+  if (retailPrice !== null && gt(tradeIn.allowanceToConsumer, retailPrice)) {
     return err(
       ruleViolation(
         'TRADE_IN_ALLOWANCE_ABOVE_RETAIL',
@@ -558,10 +591,8 @@ export function confirmDeal(command: ConfirmDealCommand): Transition<Deal> {
       ownerStoreId: deal.ownerStoreId,
       sellingStoreId: deal.sellingStoreId,
       netPriceCents: deal.netPriceToOwner.cents,
-      retailPriceCents: deal.retailPriceToConsumer.cents,
       cashDueToOwnerCents: financials.cashDueToOwner.cents,
       tradeInCreditCents: financials.tradeInCreditToOwner.cents,
-      sellerTotalResultCents: financials.sellerTotalResult.cents,
     }),
   ];
 
@@ -891,11 +922,10 @@ export function isTerminal(deal: Deal): boolean {
 /** Resumo textual da operacao, para log e para a tela de acompanhamento. */
 export function describeDeal(deal: Deal): string {
   const financials = computeFinancials(deal);
-  const parts = [
-    `liquido a Loja A ${formatMoney(deal.netPriceToOwner)}`,
-    `venda ao cliente ${formatMoney(deal.retailPriceToConsumer)}`,
-    `margem da Loja B ${formatMoney(financials.sellerGrossMargin)}`,
-  ];
+  const parts = [`liquido a Loja A ${formatMoney(deal.netPriceToOwner)}`];
+  if (financials.sellerPrivate.grossMargin !== null) {
+    parts.push(`margem da Loja B ${formatMoney(financials.sellerPrivate.grossMargin)}`);
+  }
   if (deal.tradeIn !== null) {
     parts.push(
       deal.tradeIn.destination === TradeInDestination.OWNER_STORE

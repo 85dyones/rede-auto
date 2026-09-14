@@ -72,6 +72,14 @@ function draftFor(event: DomainEvent): Draft | null {
             : 'Um veículo voltou a ficar disponível na rede.',
       };
 
+    case 'vehicle.neutral_photos_published':
+      return {
+        severity: NotificationSeverity.INFO,
+        title: 'Material de divulgacao disponivel',
+        body: 'Um veiculo da rede ganhou fotos neutras: o material ja pode ser baixado e usado no seu canal.',
+        except: [store('ownerStoreId')],
+      };
+
     case 'feed.vehicle_created':
       return {
         severity: NotificationSeverity.INFO,

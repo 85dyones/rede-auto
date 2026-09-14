@@ -18,6 +18,7 @@ import {
   FuelType,
   InspectionStatus,
   TransmissionType,
+  VehicleAngle,
   createVehicle,
 } from '../domain/vehicle/vehicle.ts';
 import type { AppContext } from '../application/context.ts';
@@ -230,6 +231,7 @@ export async function seedFoundingNetwork(
         provider: 'Cautelar Brasil',
         issuedAt: now - 10 * DAY,
         expiresAt: now + 80 * DAY,
+        fileUrl: `https://laudos.exemplo.com.br/LC-2026-${String(4500 + index)}.pdf`,
       },
       publicPrice: fromReais(spec.publicPrice),
       netPrice: fromReais(spec.netPrice),
@@ -237,8 +239,23 @@ export async function seedFoundingNetwork(
     });
 
     if (created.ok) {
-      await context.repos.vehicles.save(created.value);
-      vehicles.push(created.value);
+      // Material neutro ja publicado: e o que a parceira baixa para anunciar.
+      // As URLs sao da plataforma, nunca do CDN da loja dona.
+      const withMaterial: Vehicle = {
+        ...created.value,
+        neutralPhotos: [
+          VehicleAngle.FRONT,
+          VehicleAngle.REAR,
+          VehicleAngle.INTERIOR,
+          VehicleAngle.DASHBOARD,
+        ].map((angle) => ({
+          url: `https://midia.rede-auto.com.br/neutras/${created.value.id}/${angle.toLowerCase()}.jpg`,
+          angle,
+          publishedAt: now,
+        })),
+      };
+      await context.repos.vehicles.save(withMaterial);
+      vehicles.push(withMaterial);
     }
   }
 

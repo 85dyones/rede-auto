@@ -151,6 +151,12 @@ export type InspectionReport = {
   readonly issuedAt: Instant | null;
   /** Laudo vence: um cautelar de 8 meses atras nao diz nada sobre hoje. */
   readonly expiresAt: Instant | null;
+  /**
+   * O laudo em si, em PDF. E o unico documento do carro que circula na rede:
+   * o CRLV fica de fora de proposito, porque ele esta no nome da loja dona e
+   * entregaria a origem justamente no material que a parceira redistribui.
+   */
+  readonly fileUrl: string | null;
 };
 
 export const MISSING_INSPECTION: InspectionReport = {
@@ -159,6 +165,7 @@ export const MISSING_INSPECTION: InspectionReport = {
   provider: null,
   issuedAt: null,
   expiresAt: null,
+  fileUrl: null,
 };
 
 export function isInspectionValid(report: InspectionReport, now: Instant): boolean {
@@ -184,6 +191,48 @@ export type Pricing = {
   readonly updatedAt: Instant;
 };
 
+// ---------------------------------------------------------------------------
+// Material de divulgacao
+// ---------------------------------------------------------------------------
+
+export const VehicleAngle = {
+  FRONT: 'FRONT',
+  REAR: 'REAR',
+  LEFT: 'LEFT',
+  RIGHT: 'RIGHT',
+  INTERIOR: 'INTERIOR',
+  DASHBOARD: 'DASHBOARD',
+  ENGINE: 'ENGINE',
+  TRUNK: 'TRUNK',
+  OTHER: 'OTHER',
+} as const;
+export type VehicleAngle = (typeof VehicleAngle)[keyof typeof VehicleAngle];
+
+/**
+ * Foto curada para circular na rede: sem placa legivel, sem adesivo, sem
+ * fachada nem banner que identifique a loja.
+ *
+ * E uma colecao separada das fotos do feed de proposito. As do feed foram
+ * tiradas para o anuncio da propria loja e quase sempre carregam alguma marca
+ * dela; usa-las como material da rede entregaria a origem no primeiro anuncio
+ * que a parceira publicasse.
+ */
+export type NeutralPhoto = {
+  readonly url: string;
+  readonly angle: VehicleAngle;
+  readonly publishedAt: Instant;
+};
+
+/**
+ * Angulos sem os quais o material nao serve para anunciar. Nao e a mesma lista
+ * da vistoria de patio: la o objetivo e provar avaria, aqui e vender o carro.
+ */
+export const MATERIAL_REQUIRED_ANGLES: readonly VehicleAngle[] = [
+  VehicleAngle.FRONT,
+  VehicleAngle.REAR,
+  VehicleAngle.INTERIOR,
+];
+
 export type FeedSource = {
   readonly provider: string | null;
   readonly externalId: string | null;
@@ -207,6 +256,11 @@ export type Vehicle = {
   readonly chassis: string;
   readonly specs: VehicleSpecs;
   readonly inspection: InspectionReport;
+  /**
+   * Conjunto neutro, publicado pela loja dona, que qualquer parceira pode usar
+   * como se fosse material proprio. Vazio ate a dona curar as fotos.
+   */
+  readonly neutralPhotos: readonly NeutralPhoto[];
   readonly pricing: Pricing;
   readonly commercialStatus: CommercialStatus;
   readonly activeLockId: LockId | null;
@@ -259,6 +313,7 @@ export function createVehicle(input: CreateVehicleInput): Result<Vehicle, Domain
     chassis: identity.value.chassis,
     specs: input.specs,
     inspection,
+    neutralPhotos: [],
     pricing: { publicPrice: input.publicPrice, netPrice: input.netPrice, updatedAt: input.now },
     // Nasce em DRAFT; so vai a rede quando o laudo aprovado for confirmado.
     commercialStatus: isInspectionValid(inspection, input.now)
@@ -528,6 +583,77 @@ export function registerInspection(command: RegisterInspectionCommand): Transiti
   }
 
   return transitioned({ ...vehicle, inspection: report, commercialStatus, updatedAt: now }, events);
+}
+
+export type PublishNeutralPhotosCommand = {
+  readonly vehicle: Vehicle;
+  readonly actorStoreId: StoreId;
+  readonly photos: readonly { readonly url: string; readonly angle: VehicleAngle }[];
+  readonly now: Instant;
+};
+
+/**
+ * Publica o conjunto neutro de fotos — o material que qualquer loja parceira
+ * pode usar como se fosse dela.
+ *
+ * So a loja dona publica, porque so ela tem o carro para fotografar. E a
+ * curadoria e humana de proposito: decidir se um adesivo no vidro ou a fachada
+ * refletida no para-brisa entregam a origem e julgamento, nao regra que
+ * software aplique sozinho. O que o sistema garante e que o conjunto exista e
+ * cubra os angulos sem os quais nao da para anunciar.
+ */
+export function publishNeutralPhotos(
+  command: PublishNeutralPhotosCommand,
+): Transition<Vehicle> {
+  const { vehicle, now } = command;
+
+  if (command.actorStoreId !== vehicle.ownerStoreId) {
+    return err(
+      forbiddenError(
+        'NOT_VEHICLE_OWNER',
+        'Somente a loja proprietaria publica o material neutro — e ela quem tem o carro.',
+        { vehicleId: vehicle.id },
+      ),
+    );
+  }
+  if (vehicle.commercialStatus === CommercialStatus.SOLD) {
+    return err(conflictError('VEHICLE_SOLD', 'Veiculo ja vendido.', { vehicleId: vehicle.id }));
+  }
+
+  const photos: NeutralPhoto[] = [];
+  for (const candidate of command.photos.slice(0, 40)) {
+    const url = parseHttpUrl(candidate.url, 'foto neutra');
+    if (!url.ok) return url;
+    const angle = requireOneOf(candidate.angle, 'angulo da foto', Object.values(VehicleAngle));
+    if (!angle.ok) return angle;
+    photos.push({ url: url.value, angle: angle.value, publishedAt: now });
+  }
+
+  const present = new Set(photos.map((photo) => photo.angle));
+  const missing = MATERIAL_REQUIRED_ANGLES.filter((angle) => !present.has(angle));
+  if (missing.length > 0) {
+    return err(
+      ruleViolation(
+        'MATERIAL_ANGLES_MISSING',
+        `O material precisa de pelo menos estes angulos: ${missing.join(', ')}.`,
+        { missing, required: MATERIAL_REQUIRED_ANGLES },
+      ),
+    );
+  }
+
+  return transitioned({ ...vehicle, neutralPhotos: photos, updatedAt: now }, [
+    domainEvent('vehicle.neutral_photos_published', vehicle.id, now, {
+      ownerStoreId: vehicle.ownerStoreId,
+      photoCount: photos.length,
+      angles: [...present],
+    }),
+  ]);
+}
+
+/** O material esta completo o bastante para a parceira anunciar? */
+export function hasUsableMaterial(vehicle: Vehicle): boolean {
+  const present = new Set(vehicle.neutralPhotos.map((photo) => photo.angle));
+  return MATERIAL_REQUIRED_ANGLES.every((angle) => present.has(angle));
 }
 
 export type WithdrawVehicleCommand = {

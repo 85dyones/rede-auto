@@ -22,7 +22,7 @@ import { registerNetworkRoutes } from './http/routes/network.ts';
 import { registerInventoryRoutes } from './http/routes/inventory.ts';
 import { registerCustodyRoutes } from './http/routes/custody.ts';
 import { registerDealRoutes } from './http/routes/deals.ts';
-import { registerSharingRoutes } from './http/routes/sharing.ts';
+import { registerMaterialRoutes } from './http/routes/material.ts';
 import { registerFeedRoutes } from './http/routes/feeds.ts';
 import { createHttpServer } from './http/server.ts';
 import { seedFoundingNetwork, type SeedResult } from './infra/seed.ts';
@@ -146,7 +146,7 @@ function buildRouter(context: AppContext, config: AppConfig): Router {
   registerInventoryRoutes(router, context);
   registerCustodyRoutes(router, context);
   registerDealRoutes(router, context);
-  registerSharingRoutes(router, context, config.publicBaseUrl);
+  registerMaterialRoutes(router, context);
   registerFeedRoutes(router, context);
 
   return router;

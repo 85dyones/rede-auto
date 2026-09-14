@@ -83,6 +83,7 @@ export type RawFeedFields = {
   readonly inspectionNumber?: string | undefined;
   readonly inspectionIssuedAt?: string | undefined;
   readonly inspectionExpiresAt?: string | undefined;
+  readonly inspectionFileUrl?: string | undefined;
 };
 
 export type BuildContext = {
@@ -280,6 +281,7 @@ function buildInspection(raw: RawFeedFields, context: BuildContext): InspectionR
     provider: null,
     issuedAt: null,
     expiresAt: null,
+    fileUrl: null,
   };
 
   const issuedAt = parseFeedDate(raw.inspectionIssuedAt);
@@ -293,6 +295,8 @@ function buildInspection(raw: RawFeedFields, context: BuildContext): InspectionR
     issuedAt,
     // Sem vencimento explicito, assume a validade de mercado a partir da emissao.
     expiresAt: explicitExpiry ?? (issuedAt === null ? null : issuedAt + validity),
+    // Feed raramente traz o PDF; a loja anexa depois, pela plataforma.
+    fileUrl: raw.inspectionFileUrl ?? null,
   };
 }
 

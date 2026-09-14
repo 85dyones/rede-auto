@@ -103,6 +103,7 @@ describe('varredor periodico', () => {
         provider: 'Cautelar Brasil',
         issuedAt: T0,
         expiresAt: T0 + 90 * 24 * HOUR,
+        fileUrl: null,
       },
     });
     assert.equal(veiculo.ok, true);
@@ -133,6 +134,7 @@ describe('varredor periodico', () => {
         provider: 'Cautelar Brasil',
         issuedAt: T0,
         expiresAt: T0 + 90 * 24 * HOUR,
+        fileUrl: null,
       },
     });
     if (!veiculo.ok) return;

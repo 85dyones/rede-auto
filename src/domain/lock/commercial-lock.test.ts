@@ -128,7 +128,7 @@ describe('abertura da trava', () => {
   test('veiculo sem laudo cautelar aprovado nao pode ser travado', () => {
     const semLaudo = availableVehicle({
       commercialStatus: CommercialStatus.DRAFT,
-      inspection: { status: InspectionStatus.MISSING, reportNumber: null, provider: null, issuedAt: null, expiresAt: null },
+      inspection: { status: InspectionStatus.MISSING, reportNumber: null, provider: null, issuedAt: null, expiresAt: null, fileUrl: null },
     });
     const result = openLock({
       lockId: asLockId('lck_x'),
