@@ -123,9 +123,9 @@ export function formatPlate(plate: string): string {
 }
 
 /**
- * Placa parcialmente oculta para uso white-label: "ABC1D23" -> "ABC****".
+ * Placa parcialmente oculta no material que circula: "ABC1D23" -> "ABC****".
  * A placa completa permite consulta publica que revela o proprietario — o
- * oposto do que a lamina sem identificacao precisa entregar.
+ * oposto do que o material neutro precisa entregar.
  */
 export function maskPlate(plate: string): string {
   return plate.length >= 3 ? `${plate.slice(0, 3)}${'*'.repeat(plate.length - 3)}` : '***';

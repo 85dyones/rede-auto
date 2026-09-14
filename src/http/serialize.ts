@@ -1,7 +1,7 @@
 /**
  * Serializacao dos agregados para JSON da API.
  *
- * Escrita a mao, campo a campo, pelo mesmo motivo da lamina white-label: com
+ * Escrita a mao, campo a campo, pelo mesmo motivo do material neutro: com
  * spread do agregado, todo campo interno novo passaria a sair na API por
  * padrao, e a unica forma de descobrir seria em producao.
  *

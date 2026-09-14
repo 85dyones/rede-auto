@@ -11,7 +11,7 @@ type Route = {
   readonly method: HttpMethod;
   readonly segments: readonly string[];
   readonly handler: Handler;
-  /** Rotas publicas nao exigem chave de API (lamina white-label, health). */
+  /** Rotas publicas nao exigem chave de API: so `/health` e o indice `/api/v1`. */
   readonly public: boolean;
   readonly pattern: string;
 };

@@ -576,10 +576,26 @@ está em [`glossario.md`](glossario.md).
 | **Trava comercial** | "reserva", "bloqueio", "hold" |
 | **Estoque avançado** | "consignado", "emprestado" |
 | **Termo de custódia** / **vistoria** | "checklist", "inspeção" |
-| **Chamada de retorno** (recall) | "devolução", "cancelamento" |
+| **Chamada de retorno** (recall) | "cancelamento"; e nunca "devolução" **como nome da funcionalidade** |
 | **Transbordo** | "repasse da troca" |
 | **Laudo cautelar** | "vistoria cautelar", "laudo" sozinho |
-| **Lâmina** | "ficha", "anúncio" |
+| **Ficha** (o PDF que circula) | "anúncio" |
+
+Duas ressalvas que valem mais que a tabela, porque é onde ela costuma ser mal
+aplicada:
+
+**"Devolução" é legítima para o ato, proibida para a coisa.** O recall se chama
+*chamada de retorno* — é ele que tem id, situação e prazo. Mas devolver o carro é
+literalmente o que acontece, e o verbo é do próprio domínio: o campo da API é
+`devoDevolver`. Então "Prazo de devolução estourado" (o texto real da
+notificação) está certo; "abrir uma devolução" no lugar de "chamada de retorno",
+não.
+
+**"Lâmina" saiu do vocabulário.** A palavra é jargão de pátio e nem todo vendedor
+novo conhece; o produto inteiro já diz *ficha* — rota (`/material/ficha.pdf`),
+módulo, campo do kit e testes. Duas fichas convivem sem ambiguidade porque vivem
+em telas diferentes: a **ficha do veículo** é a tela de detalhe (§5.2), e a
+**ficha de divulgação** é o PDF que a parceira baixa e manda no WhatsApp (§5.6).
 
 Enums que aparecem crus na API e precisam de rótulo em pt-BR na interface:
 `AVAILABLE` → Disponível · `LOCKED` → Em negociação · `SOLD` → Vendido ·

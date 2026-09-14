@@ -30,7 +30,7 @@ export const StoreStatus = {
 export type StoreStatus = (typeof StoreStatus)[keyof typeof StoreStatus];
 
 export const UserRole = {
-  /** Abre e estende travas, monta negociacao, gera lamina white-label. */
+  /** Abre e estende travas, monta negociacao, baixa a ficha de divulgacao. */
   SALESPERSON: 'SALESPERSON',
   /** Tudo do vendedor + preco liquido, aceite de transbordo, recall, custodia. */
   MANAGER: 'MANAGER',

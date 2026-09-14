@@ -185,7 +185,7 @@ export type Pricing = {
   readonly publicPrice: Money;
   /**
    * Preco LIQUIDO de repasse: o que a loja dona exige receber.
-   * Dado estritamente B2B — nunca sai numa lamina white-label.
+   * Dado estritamente B2B — nunca sai no material que a parceira republica.
    */
   readonly netPrice: Money;
   readonly updatedAt: Instant;

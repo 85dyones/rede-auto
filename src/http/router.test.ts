@@ -48,9 +48,9 @@ describe('casamento de rotas', () => {
   test('prefixo literal mais longo vence', async () => {
     const router = new Router()
       .get('/s/:token/:recurso', handler('generico'))
-      .get('/s/:token/lamina.pdf', handler('pdf'));
+      .get('/s/:token/ficha.pdf', handler('pdf'));
 
-    assert.equal(await labelOf(router, 'GET', '/s/abc/lamina.pdf'), 'pdf');
+    assert.equal(await labelOf(router, 'GET', '/s/abc/ficha.pdf'), 'pdf');
     assert.equal(await labelOf(router, 'GET', '/s/abc/outra'), 'generico');
   });
 

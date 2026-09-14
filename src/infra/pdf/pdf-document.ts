@@ -1,13 +1,13 @@
 /**
  * Gerador de PDF minimo, sem dependencias.
  *
- * A lamina precisa sair como PDF de verdade — e o que o vendedor anexa no
- * WhatsApp e o que o cliente imprime. Trazer uma biblioteca de PDF para isso
- * seria desproporcional: a lamina e texto, linhas e retangulos numa pagina A4.
+ * A ficha de divulgacao precisa sair como PDF de verdade — e o que o vendedor
+ * anexa no WhatsApp e o que o cliente imprime. Trazer uma biblioteca de PDF para
+ * isso seria desproporcional: a ficha e texto, linhas e retangulos numa A4.
  *
  * Escopo deliberado: fontes Type1 padrao (Helvetica), texto com quebra de linha
  * e alinhamento, linhas e retangulos. Sem imagens — as fotos vao na versao HTML
- * da lamina, que e a que o cliente abre no celular.
+ * da ficha, que e a que o cliente abre no celular.
  *
  * Codificacao: WinAnsiEncoding. Para os caracteres do portugues (a-z, acentos,
  * cedilha) ela coincide byte a byte com Latin-1, entao a escrita e direta.
