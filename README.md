@@ -13,11 +13,18 @@ improvisa a logística. Esta plataforma digitaliza essa dinâmica com uma regra
 que não existe no telefone — **exclusividade temporária garantida por sistema** —
 e elimina o risco que ela cria: duas lojas vendendo o mesmo carro.
 
+E a rede é **local**. Não é detalhe de lançamento, é a precondição de todo o
+resto: levar o carro ao showroom da parceira, devolvê-lo em 4 horas úteis, o
+vendedor ir até o pátio assinar a vistoria — nada disso fecha se as lojas não
+estiverem a minutos umas das outras. O piloto é **Curitiba e Região**; cada
+praça futura é um cluster próprio, com estoque, custódia e governança que não
+se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
+
 ```bash
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 324 testes
+npm run check    # typecheck estrito + 366 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -47,6 +54,50 @@ oportunidade de balcão, porque continua na vitrine dela.
 
 Nenhuma transição de um eixo altera o outro. A única exceção é a entrega ao
 comprador final, que encerra os dois.
+
+## Cluster: a rede é local, e isso é uma fronteira
+
+O modelo inteiro depende de proximidade. Um SLA de recall de 4 horas úteis entre
+Curitiba e Porto Alegre não é um SLA — é uma ficção. Então a praça não é um
+filtro de busca, é uma **fronteira**: estoque, custódia, travas, negociações e
+governança não atravessam cluster.
+
+O piloto é uma praça só:
+
+| | |
+|---|---|
+| Praça | Curitiba e Região (PR) |
+| Municípios | Curitiba, São José dos Pinhais, Colombo, Araucária, Pinhais, Campo Largo, Almirante Tamandaré, Piraquara, Fazenda Rio Grande, Quatro Barras |
+| Raio operacional declarado | 60 km |
+| Fundadoras | 6, todas dentro do raio |
+
+O raio é declarado, não calculado — serve para a governança julgar candidatura
+("essa loja fica a 180 km, o recall de 4h vai falhar toda vez") e para o produto
+explicar por que a rede é local. Acima de **300 km** o cadastro é recusado: ida e
+volta deixam de caber no dia útil, e um cluster maior que isso não é um cluster,
+são dois.
+
+**Por que agora, se clusters são planos futuros.** Porque *tenancy* é a coisa
+clássica que não dá para retrofitar. A segunda praça, hoje, custa uma linha de
+seed; depois de trinta consultas escritas sem escopo, custa uma auditoria — e o
+que vaza no meio do caminho é preço líquido de concorrente de outra cidade.
+
+A fronteira não depende de ninguém lembrar dela:
+
+- `VehicleQuery.clusterId` é **obrigatório no tipo**. Não existe busca sem praça.
+- `searchCatalog` recebe o ator e injeta a praça dele. O tipo de entrada
+  (`CatalogQuery`) *omite* `clusterId`: buscar em outra praça não é proibido, é
+  impossível de escrever.
+- `loadVehicle` é o único caminho de um id até um veículo, e é onde a guarda
+  mora. Carro de outra praça responde **404, não 403** — distinguir "não é seu"
+  de "não existe" já entrega que existe.
+- Broadcast de notificação exige `clusterId` no tipo; um aviso sem praça não
+  chega a ninguém, em vez de chegar à rede errada.
+- `founders(clusterId)` e `pending(clusterId)`: o quórum de 3 é contado dentro de
+  uma praça só. Fundadora de Curitiba não vota em candidata de Londrina.
+
+O que **não** existe ainda, e é deliberado: cobrança, provisionamento de praça e
+autoatendimento de SaaS. Só a fronteira, que é a parte cara depois.
 
 ## Como o dinheiro funciona
 
@@ -117,10 +168,12 @@ retroativo puniria a Loja B por ter respeitado a própria trava.
 Se a negociação travada **fechar**, o recall é cancelado: não há o que devolver,
 o carro virou dinheiro — que era o objetivo de todos desde o início.
 
-O SLA é contado em horas **úteis** de verdade: fuso de São Paulo, segunda a
-sexta 08:00–18:00, sábado 09:00–13:00, feriados nacionais incluindo os móveis
-derivados da Páscoa. Um pedido feito sexta às 17h vence segunda de manhã, não às
-2h da madrugada de domingo.
+O SLA é contado em horas **úteis** de verdade: horário de Brasília (o
+identificador IANA é `America/Sao_Paulo`, que cobre o Paraná igualmente), segunda
+a sexta 08:00–18:00, sábado 09:00–13:00, feriados nacionais incluindo os móveis
+derivados da Páscoa **e os da praça** — 19 de dezembro (Emancipação Política do
+Paraná) e 8 de setembro (padroeira de Curitiba). Um pedido feito sexta às 17h
+vence segunda de manhã, não às 2h da madrugada de domingo.
 
 **E existe um escape operacional**, porque o prazo pressupõe motorista — e nem
 sempre há. Sem saída, a regra rígida produz o pior dos dois mundos: ou a Loja B
@@ -254,11 +307,12 @@ tamanho, profundidade e número de nós.
 src/
 ├── domain/          núcleo funcional puro: sem I/O, sem framework, sem relógio real
 │   ├── shared/      Result, Money em centavos, Clock injetável, horas úteis, validação pt-BR
+│   ├── cluster/     a praça: fronteira de estoque, custódia e governança
 │   ├── network/     lojas, usuários, credenciamento por quórum
 │   ├── vehicle/     o agregado central, com os dois eixos desacoplados
 │   ├── lock/        trava comercial com TTL e política de evidências
 │   ├── custody/     termo de vistoria assinado e livro de responsabilidade civil
-│   ├── recall/      prioridade dono vs. custodiante e SLA em horas úteis
+│   ├── recall/      prioridade dono vs. custodiante, SLA em horas úteis e o escape
 │   ├── deal/        repasse, trade-in, liquidação, ATPV-e
 │   └── material/    kit neutro que a parceira baixa para anunciar
 ├── application/     casos de uso: carregam, decidem, persistem, publicam
@@ -344,7 +398,7 @@ sai em `GET /api/v1`.
 ## Estado do projeto
 
 Implementado e testado: todo o domínio, os casos de uso, a API HTTP, a ingestão
-de feeds, o material de divulgação e a trilha de auditoria. 324 testes,
+de feeds, o material de divulgação e a trilha de auditoria. 366 testes,
 typecheck estrito (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,
 `erasableSyntaxOnly`) sem erros.
 
@@ -359,7 +413,7 @@ entregue aqui:
   tabela de travas: sem ele, duas lojas podem ler `AVAILABLE` ao mesmo tempo e
   ambas travar — que é precisamente o problema que a plataforma existe para
   eliminar. Detalhes e os outros três pontos de corrida em
-  [`decisoes.md`](docs/decisoes.md#22-concorrência-o-que-muda-quando-sair-da-memória).
+  [`decisoes.md`](docs/decisoes.md#23-concorrência-o-que-muda-quando-sair-da-memória).
 - **autenticação de produção.** A chave de API é adaptador de desenvolvimento:
   falta rotação, revogação, escopo por chave (uma chave de integração de feed
   não deveria poder fechar venda) e limite de requisições.
@@ -377,3 +431,9 @@ entregue aqui:
   garante que o conjunto exista e cubra os ângulos, não que ele esteja limpo.
   Borrar placa e remover marca automaticamente é trabalho de visão
   computacional, fora do que foi entregue.
+- **o SaaS em volta do cluster.** A fronteira existe e é testada; o negócio em
+  volta dela não. Faltam cobrança e plano, provisionamento de praça
+  (autoatendimento para constituir um cluster novo e suas fundadoras), e a
+  decisão de produto sobre calendário por praça — hoje o expediente e os
+  feriados são da instalação, e um cluster em outro estado tem feriado próprio.
+  Nada disso muda a fronteira: são camadas por cima dela.

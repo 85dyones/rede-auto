@@ -16,7 +16,7 @@ usuário)** — o papel do usuário decide o que ele pode fazer.
 plataforma, e não há superfície voltada a ele.
 
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
-> [`decisoes.md`](decisoes.md#23-o-que-ficou-de-fora-e-por-quê).
+> [`decisoes.md`](decisoes.md#24-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
@@ -37,6 +37,12 @@ Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 
 **Datas** em ISO-8601 UTC. **Prazos** vêm com um campo legível ao lado
 (`restante: "3h 12min"`).
+
+**Praça.** Toda resposta é implicitamente escopada ao cluster da loja
+autenticada, e **nenhuma rota aceita a praça como parâmetro**. Ela vem da chave
+de API, e só de lá: se fosse entrada, bastaria trocar um id para ler o preço
+líquido de um concorrente de outra cidade. Um veículo de outra praça responde
+`404` — para quem está fora, ele não existe.
 
 **Erros**:
 
@@ -67,9 +73,35 @@ aparece em toda resposta e no log do servidor.
 
 ## Rede e governança
 
+### `GET /api/v1/cluster`
+
+A praça em que a loja autenticada opera.
+
+```jsonc
+{
+  "cluster": {
+    "id": "clu_curitiba_rmc",
+    "nome": "Curitiba e Regiao",
+    "identificador": "curitiba-rmc",
+    "uf": "PR",
+    "municipios": ["Curitiba", "Sao Jose dos Pinhais", "Colombo", "…"],
+    "raioOperacionalKm": 60,
+    "situacao": "ACTIVE",
+    "constituidoEm": "2026-03-09T12:00:00.000Z"
+  }
+}
+```
+
+`raioOperacionalKm` é **declarado**, não calculado a partir dos endereços. Serve
+para a tela explicar o alcance da rede e para a governança julgar candidatura
+("essa loja fica a 180 km, o recall de 4h vai falhar toda vez"). O cadastro
+recusa acima de 300 km.
+
 ### `GET /api/v1/lojas` · `GET /api/v1/lojas/fundadoras`
 
-Lojas da rede. A segunda traz também `avaisNecessarios`.
+Lojas **da sua praça** — não existe "todas as lojas da instalação". A segunda
+traz também `avaisNecessarios`, e lista apenas as fundadoras do seu cluster: o
+quórum de 3 é contado dentro de uma praça só.
 
 ### `POST /api/v1/credenciamentos`
 

@@ -8,6 +8,7 @@ vocabulário, [`glossario.md`](glossario.md).
 
 | Agregado | Arquivo | Fronteira de consistência |
 |---|---|---|
+| `Cluster` | `domain/cluster/cluster.ts` | próprio — e é a fronteira de todos os outros |
 | `Vehicle` | `domain/vehicle/vehicle.ts` | com `CommercialLock` — ver abaixo |
 | `CommercialLock` | `domain/lock/commercial-lock.ts` | com `Vehicle` |
 | `CustodyTransfer` | `domain/custody/custody.ts` | próprio, referencia `Vehicle` |
@@ -20,6 +21,52 @@ vocabulário, [`glossario.md`](glossario.md).
 veículo esteja `LOCKED` e a trava, expirada. Por isso as transições devolvem os
 dois juntos (`VehicleWithLock`) e precisam ser persistidas na mesma operação.
 Num adaptador de banco real, isso é uma transação explícita.
+
+## Cluster: a praça, e por que ela é uma fronteira
+
+A rede é local. Não é detalhe de lançamento: é a precondição de todo o resto.
+Levar o carro ao showroom da parceira, devolvê-lo em 4 horas úteis, o vendedor
+ir até o pátio assinar a vistoria — nada disso fecha se as lojas não estiverem a
+minutos umas das outras. Um SLA de 4 horas entre Curitiba e Porto Alegre não é
+um SLA, é uma ficção.
+
+Daí o cluster **não** ser um filtro de busca. Filtro se esquece de aplicar;
+fronteira não. `Store.clusterId` e `Vehicle.clusterId` são imutáveis — mudar de
+praça não é editar um campo, é sair de uma rede e se credenciar em outra, com
+quórum novo.
+
+```
+   cluster "curitiba-rmc"                 cluster "londrina" (futuro)
+   ┌──────────────────────────┐           ┌──────────────────────────┐
+   │  6 fundadoras            │           │  fundadoras próprias     │
+   │  estoque                 │     ╳     │  estoque                 │
+   │  custódia física         │  não se   │  custódia física         │
+   │  quórum de 3 avais       │  cruzam   │  quórum próprio          │
+   └──────────────────────────┘           └──────────────────────────┘
+```
+
+Quatro mecanismos sustentam isso sem depender de disciplina:
+
+| Onde | Como |
+|---|---|
+| `VehicleQuery.clusterId` | obrigatório **no tipo** — não existe busca sem praça |
+| `searchCatalog(ctx, actor, q)` | injeta a praça do ator; `CatalogQuery` *omite* `clusterId`, então buscar em outra praça é impossível de escrever, não apenas proibido |
+| `loadVehicle(ctx, actor, id)` | único caminho de um id até um veículo (20 chamadas); carro de outra praça responde **404** |
+| `Draft.broadcast.clusterId` | aviso de rede sem praça não chega a ninguém, em vez de chegar à rede errada |
+
+`requireSameCluster(ator, alvo, o quê)` é a guarda para o caso em que o alvo já
+foi resolvido por outra via — aí responde **403**, porque fingir inexistência de
+algo já identificado só confundiria o suporte.
+
+O raio operacional é declarado, não calculado: serve para a governança julgar
+candidatura e para o produto explicar por que a rede é local. `parseClusterDraft`
+recusa acima de **300 km** — ida e volta deixam de caber no dia útil, e o SLA de
+recall passa a ser uma promessa que a operação não tem como cumprir.
+
+O calendário de horas úteis inclui os feriados da praça além dos nacionais
+(`curitibaRegionalHolidays`). Ele ainda vive na instalação, não no cluster — ver
+a decisão sobre a praça em [`decisoes.md`](decisoes.md), inclusive por que o
+correto a longo prazo é o calendário seguir a loja custodiante.
 
 ## Veículo: dois eixos independentes
 

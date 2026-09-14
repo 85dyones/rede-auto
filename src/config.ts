@@ -15,6 +15,8 @@ import type { RecallPolicy } from './domain/recall/recall.ts';
 import {
   type BusinessCalendar,
   brazilianNationalHolidays,
+  curitibaRegionalHolidays,
+  mergeHolidays,
   timeWindow,
 } from './domain/shared/business-hours.ts';
 import { MINUTE } from './domain/shared/clock.ts';
@@ -30,19 +32,25 @@ export type NetworkPolicies = {
  * Expediente da rede: segunda a sexta 08:00-18:00 e sabado 09:00-13:00.
  * Loja de seminovos abre sabado, e ignorar isso inflaria todo prazo pedido na
  * sexta a tarde.
+ *
+ * O fuso e `America/Sao_Paulo`, que e o identificador IANA do horario de
+ * Brasilia — cobre o Parana igualmente, apesar do nome.
+ *
+ * Os feriados sao os nacionais **mais** os da praca do piloto. Enquanto houver
+ * um cluster so, o calendario da instalacao e o calendario da praca; quando a
+ * segunda existir, ele se muda para o cluster (ver `decisoes.md`).
  */
 export function defaultCalendar(referenceYear = new Date().getUTCFullYear()): BusinessCalendar {
+  const years = [referenceYear - 1, referenceYear, referenceYear + 1, referenceYear + 2];
   return {
     timeZone: 'America/Sao_Paulo',
     workdays: [1, 2, 3, 4, 5, 6],
     windows: [timeWindow('08:00', '18:00')],
     windowsByWeekday: { 6: [timeWindow('09:00', '13:00')] },
-    holidays: brazilianNationalHolidays([
-      referenceYear - 1,
-      referenceYear,
-      referenceYear + 1,
-      referenceYear + 2,
-    ]),
+    holidays: mergeHolidays(
+      brazilianNationalHolidays(years),
+      curitibaRegionalHolidays(years),
+    ),
   };
 }
 

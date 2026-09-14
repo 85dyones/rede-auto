@@ -341,6 +341,37 @@ export function brazilianNationalHolidays(years: readonly number[]): Set<string>
   return holidays;
 }
 
+/**
+ * Feriados regionais da praca de Curitiba.
+ *
+ * Feriado nacional nao e a lista inteira: 19 de dezembro (Emancipacao Politica
+ * do Parana) fecha o estado, e 8 de setembro (Nossa Senhora da Luz dos Pinhais,
+ * padroeira) fecha a capital. Cobrar SLA de retorno num dia em que a loja esta
+ * fechada e cobrar por tempo que ela nao tinha como usar — exatamente o que a
+ * aritmetica de horas uteis existe para evitar.
+ *
+ * **Limite conhecido, e ele importa.** Cada municipio da regiao metropolitana
+ * tem o proprio padroeiro: Sao Jose dos Pinhais, Colombo e Araucaria nao fecham
+ * nos mesmos dias que Curitiba. Uma lista por praca e uma aproximacao — a forma
+ * correta e o calendario seguir a loja custodiante, porque e a agenda **dela**
+ * que determina se o prazo era cumprivel. Fica registrado como decisao em
+ * aberto: resolver isso sem operador real produziria a regra errada.
+ */
+export function curitibaRegionalHolidays(years: readonly number[]): Set<string> {
+  const holidays = new Set<string>();
+  for (const year of years) {
+    holidays.add(`${year}-09-08`); // Nossa Senhora da Luz dos Pinhais (Curitiba)
+    holidays.add(`${year}-12-19`); // Emancipacao Politica do Parana
+  }
+  return holidays;
+}
+
+export function mergeHolidays(...sets: readonly ReadonlySet<string>[]): Set<string> {
+  const merged = new Set<string>();
+  for (const set of sets) for (const date of set) merged.add(date);
+  return merged;
+}
+
 function holidaysForYear(year: number): string[] {
   const fixed = [
     `${year}-01-01`, // Confraternizacao Universal

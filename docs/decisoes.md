@@ -115,7 +115,71 @@ obrigação que ele mede.
 
 ---
 
-## 7. Responsabilidade civil muda no check-in, não no checkout
+## 7. A praça é fronteira, não filtro — e nasce antes da segunda praça existir
+
+**Decisão.** `Cluster` entra agora, com `Store.clusterId` e `Vehicle.clusterId`
+imutáveis, `VehicleQuery.clusterId` obrigatório no tipo e a guarda dentro de
+`loadVehicle`. O piloto tem **uma** praça: Curitiba e Região.
+
+**Por quê.** Duas razões, e a segunda é a que decide.
+
+A primeira é que a rede *é* local, e isso não é um detalhe de lançamento — é a
+precondição do modelo. Levar o carro ao showroom da parceira, devolvê-lo em 4
+horas úteis, o vendedor ir até o pátio assinar a vistoria: nada disso fecha entre
+cidades distantes. Um cluster não é um segmento de mercado, é o raio dentro do
+qual a custódia física funciona.
+
+A segunda é que *tenancy* é a coisa clássica que não dá para retrofitar. A
+segunda praça, hoje, custa uma linha de seed. Depois de trinta consultas
+escritas sem escopo, custa uma auditoria de todas elas — e o que vaza enquanto a
+auditoria não acontece é preço líquido de concorrente de outra cidade. O usuário
+disse "clusters locais futuramente"; a parte do futuro que precisa existir agora
+é exatamente a que não dá para acrescentar depois.
+
+**Consequência.** A fronteira não depende de ninguém lembrar dela:
+
+- `VehicleQuery.clusterId` obrigatório fez o compilador cobrar em toda chamada —
+  o mesmo remédio de `dealDto(deal, viewer)`.
+- `CatalogQuery` **omite** `clusterId`, e `searchCatalog` injeta o do ator.
+  Buscar em outra praça não é proibido: é impossível de escrever. Se a praça
+  fosse parâmetro de entrada, bastaria trocar um id no query string.
+- `loadVehicle` é o único caminho de um id até um veículo (20 chamadas), então a
+  guarda mora lá. Responde **404**, não 403 — distinguir "não é seu" de "não
+  existe" já entrega que existe.
+- Broadcast de notificação exige `clusterId` no tipo. Sem praça, o aviso não
+  chega a ninguém — silêncio é a falha segura; vazamento entre praças não é.
+
+**Descartado.** Deixar o cluster como coluna de filtro aplicada nas consultas.
+É o mesmo desenho, com a diferença de que funciona enquanto todo mundo lembra —
+e é exatamente assim que vazamento de *tenancy* acontece em produção.
+
+**Descartado também**, e explicitamente: cobrança, plano, provisionamento de
+praça e autoatendimento de SaaS. Essas são camadas por cima da fronteira, e
+custam o mesmo construídas depois. A fronteira, não.
+
+**Em aberto, e mais fundo do que parece.** O calendário de expediente hoje é da
+instalação, não da praça — e nem *da praça* seria suficiente.
+
+Feriado nacional não é a lista inteira: 19 de dezembro (Emancipação Política do
+Paraná) fecha o estado e 8 de setembro (padroeira) fecha Curitiba, e o cálculo
+de horas úteis passou a incluir os dois. Cobrar SLA num dia em que a loja está
+fechada é cobrar por tempo que ela não tinha como usar — exatamente o que a
+aritmética de horas úteis existe para evitar.
+
+Só que cada município da região metropolitana tem o próprio padroeiro: São José
+dos Pinhais, Colombo e Araucária não fecham nos mesmos dias que Curitiba. Uma
+lista por praça é aproximação. O correto é o calendário seguir a **loja
+custodiante**, porque é a agenda dela que determina se o prazo era cumprível.
+
+Fica em aberto de propósito: decidir isso sem operador real produziria a regra
+errada, e a aproximação atual erra para o lado seguro (estende prazo em vez de
+cobrar por dia fechado). A política já é parâmetro (`NetworkPolicies`), então
+descê-la para o cluster — e depois para a loja — é mecânico quando houver a quem
+perguntar.
+
+---
+
+## 8. Responsabilidade civil muda no check-in, não no checkout
 
 **Decisão.** Em trânsito, `custodianStoreId` continua sendo a loja de **origem**.
 
@@ -128,7 +192,7 @@ a atribuição de multa reflete isso.
 
 ---
 
-## 8. Horas úteis de verdade, não `+ 4 * 3600_000`
+## 9. Horas úteis de verdade, não `+ 4 * 3600_000`
 
 **Decisão.** Aritmética completa de horas úteis: fuso via `Intl`, dias e janelas
 configuráveis por dia da semana, feriados nacionais incluindo os móveis
@@ -145,7 +209,7 @@ e a dependência traria muito mais superfície do que resolve.
 
 ---
 
-## 9. Dinheiro em centavos inteiros
+## 10. Dinheiro em centavos inteiros
 
 **Decisão.** `Money = { currency: 'BRL', cents: number }`, sempre inteiro.
 
@@ -156,7 +220,7 @@ integrador varia entre eles.
 
 ---
 
-## 10. Domínio funcional puro, sem classes de agregado
+## 11. Domínio funcional puro, sem classes de agregado
 
 **Decisão.** Dados imutáveis + funções puras
 `(estado, comando) → Result<{estado', eventos}, erro>`.
@@ -173,7 +237,7 @@ mutam o mesmo objeto e a segunda falha.
 
 ---
 
-## 11. `Result` para falhas de negócio, `throw` só para bugs
+## 12. `Result` para falhas de negócio, `throw` só para bugs
 
 **Decisão.** Tudo que um usuário da rede pode causar retorna `err(...)`.
 `throw` é reservado a invariantes quebradas (`InvariantViolationError`).
@@ -185,7 +249,7 @@ vira 4xx com código estável; `InvariantViolationError` vira 500 e alerta.
 
 ---
 
-## 12. Expiração preguiçosa **e** ativa
+## 13. Expiração preguiçosa **e** ativa
 
 **Decisão.** A trava é materializada em toda leitura do veículo e também por um
 varredor periódico, ambos pela mesma função idempotente.
@@ -199,7 +263,7 @@ falhar, atrasar ou nem rodar sem produzir estado inválido.
 
 ---
 
-## 13. Rede fechada: o anonimato muda de lugar
+## 14. Rede fechada: o anonimato muda de lugar
 
 **Decisão.** Não existe superfície para o consumidor. Nenhuma rota pública de
 negócio, nenhum link enviado ao cliente, nenhuma página hospedada. O consumidor
@@ -222,7 +286,7 @@ que deixou de existir. Removê-la eliminou um agregado inteiro.
 
 ---
 
-## 14. Fotos neutras são uma coleção separada, não um filtro
+## 15. Fotos neutras são uma coleção separada, não um filtro
 
 **Decisão.** O veículo tem duas coleções: as fotos do feed (uso interno) e um
 conjunto **neutro** publicado pela loja dona, que é o único que entra no
@@ -251,7 +315,7 @@ porque fala do carro, não de quem o possui.
 
 ---
 
-## 15. A dona não vê a margem da parceira
+## 16. A dona não vê a margem da parceira
 
 **Decisão.** Os números da loja vendedora — preço ao consumidor, valor dado na
 troca, margem, resultado — vivem num bloco `sellerPrivate` que a loja
@@ -274,7 +338,7 @@ alimentam notificação e auditoria, e a dona lê as duas.
 
 ---
 
-## 16. Preço ao consumidor é opcional
+## 17. Preço ao consumidor é opcional
 
 **Decisão.** `retailPriceToConsumer` pode ser `null`.
 
@@ -290,7 +354,7 @@ idêntico.
 
 ---
 
-## 17. Sanitização por lista de inclusão
+## 18. Sanitização por lista de inclusão
 
 **Decisão.** `buildMaterialKit` monta o objeto campo a campo. Nunca
 `{...vehicle}` com remoções.
@@ -306,7 +370,7 @@ atualizar a função.
 
 ---
 
-## 18. O feed não decide sozinho
+## 19. O feed não decide sozinho
 
 **Decisão.** A sincronização nunca move custódia física, nunca derruba
 negociação em andamento, e não retira da rede um carro que sumiu do feed mas
@@ -323,7 +387,7 @@ pelo número que travou.
 
 ---
 
-## 19. Chassi como chave de deduplicação da rede
+## 20. Chassi como chave de deduplicação da rede
 
 **Decisão.** Chassi já anunciado por outra loja é recusado, tanto no cadastro
 manual quanto na ingestão.
@@ -334,7 +398,7 @@ isso a sincronização casa por id externo **ou** por chassi, nessa ordem.
 
 ---
 
-## 20. Zero dependências de runtime
+## 21. Zero dependências de runtime
 
 **Decisão.** Só Node built-ins. Parser XML, gerador de PDF, roteador HTTP e
 autenticação escritos à mão.
@@ -353,7 +417,7 @@ material fotográfico que acompanha o kit, e as fotos vão como arquivos. A saí
 
 ---
 
-## 21. Português nos limites, inglês na estrutura
+## 22. Português nos limites, inglês na estrutura
 
 **Decisão.** Identificadores de código em inglês; termos intraduzíveis do
 domínio (ATPV-e, laudo cautelar, placa, chassi) em português; mensagens de erro,
@@ -365,7 +429,7 @@ negócio — que é onde a ambiguidade custa caro — fica ancorado no
 
 ---
 
-## 22. Concorrência: o que muda quando sair da memória
+## 23. Concorrência: o que muda quando sair da memória
 
 O adaptador atual é em memória e o processo é single-threaded, então **duas
 tentativas de travar o mesmo carro nunca se cruzam**. Isso é uma propriedade do
@@ -392,7 +456,7 @@ novo sem persistir, então envolver "carregar → decidir → salvar" numa trans
 
 ---
 
-## 23. O que ficou de fora, e por quê
+## 24. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

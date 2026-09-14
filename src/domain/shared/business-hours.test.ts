@@ -5,6 +5,8 @@ import {
   addBusinessHours,
   brazilianNationalHolidays,
   businessMinutesBetween,
+  curitibaRegionalHolidays,
+  mergeHolidays,
   isBusinessDay,
   isWithinBusinessHours,
   localDateKey,
@@ -149,6 +151,56 @@ describe('feriados nacionais', () => {
     const holidays = brazilianNationalHolidays([2025, 2026, 2027]);
     assert.equal(holidays.has('2025-04-18'), true); // Sexta-feira Santa 2025
     assert.equal(holidays.has('2027-03-26'), true); // Sexta-feira Santa 2027
+  });
+});
+
+describe('feriados da praca de Curitiba', () => {
+  test('cobre o estadual e o municipal que o nacional ignora', () => {
+    const regionais = curitibaRegionalHolidays([2026]);
+    assert.equal(regionais.has('2026-12-19'), true, 'Emancipacao Politica do Parana');
+    assert.equal(regionais.has('2026-09-08'), true, 'Nossa Senhora da Luz dos Pinhais');
+
+    const nacionais = brazilianNationalHolidays([2026]);
+    assert.equal(nacionais.has('2026-12-19'), false, 'o nacional nao cobre — por isso a lista existe');
+  });
+
+  test('o prazo pula o feriado estadual em vez de correr sobre a loja fechada', () => {
+    const anos = [2026];
+    const semRegional: BusinessCalendar = {
+      ...weekdaysOnly,
+      holidays: brazilianNationalHolidays(anos),
+    };
+    const comRegional: BusinessCalendar = {
+      ...weekdaysOnly,
+      holidays: mergeHolidays(brazilianNationalHolidays(anos), curitibaRegionalHolidays(anos)),
+    };
+
+    // Em 2026 o 19/12 cai num sabado, que ja nao e dia util aqui: os dois
+    // calendarios chegam ao mesmo prazo. Serve para mostrar que a lista
+    // regional nao mexe no que nao e dela.
+    const sexta = zonedToInstant(2026, 12, 18, 16 * 60, SP);
+    assert.equal(localOf(addBusinessHours(sexta, 4, semRegional)), '2026-12-21 10:00');
+    assert.equal(localOf(addBusinessHours(sexta, 4, comRegional)), '2026-12-21 10:00');
+
+    // O efeito real aparece quando 19/12 e dia util. Em 2029 e uma quarta.
+    const anos29 = [2029];
+    const sem29: BusinessCalendar = { ...weekdaysOnly, holidays: brazilianNationalHolidays(anos29) };
+    const com29: BusinessCalendar = {
+      ...weekdaysOnly,
+      holidays: mergeHolidays(brazilianNationalHolidays(anos29), curitibaRegionalHolidays(anos29)),
+    };
+    // Terca 18/12/2029 as 16h: sobram 2h no dia, e 2h transbordam.
+    const terca = zonedToInstant(2029, 12, 18, 16 * 60, SP);
+    assert.equal(
+      localOf(addBusinessHours(terca, 4, sem29)),
+      '2029-12-19 10:00',
+      'sem o feriado estadual o prazo vence na quarta',
+    );
+    assert.equal(
+      localOf(addBusinessHours(terca, 4, com29)),
+      '2029-12-20 10:00',
+      'com ele o prazo pula para quinta — a loja estava fechada na quarta',
+    );
   });
 });
 

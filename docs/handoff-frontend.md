@@ -1,7 +1,7 @@
 # Handoff de frontend — rede-auto
 
 **Para:** Claude Design · **De:** time de backend · **Status:** API implementada e
-testada (324 testes), frontend inexistente.
+testada (366 testes), frontend inexistente.
 
 Este documento é o briefing para a proposta visual. Tudo aqui está ancorado no
 contrato real da API — os JSON citados são respostas de verdade, capturadas do
@@ -16,10 +16,23 @@ completo), [`glossario.md`](glossario.md) (vocabulário).
 
 ## 1. O produto, em um minuto
 
-Rede **fechada** de 6 lojas fundadoras de seminovos que compartilham estoque
-entre si. Quando a Loja B tem um cliente para um carro que está na Loja A, hoje
-isso se resolve no WhatsApp: negocia margem, confirma disponibilidade, combina o
-frete. É moroso, e a lentidão mata a venda. A plataforma substitui essa conversa.
+Rede **fechada e local** de 6 lojas fundadoras de seminovos que compartilham
+estoque entre si. Quando a Loja B tem um cliente para um carro que está na Loja
+A, hoje isso se resolve no WhatsApp: negocia margem, confirma disponibilidade,
+combina o frete. É moroso, e a lentidão mata a venda. A plataforma substitui
+essa conversa.
+
+**Local importa para o design.** O piloto é Curitiba e Região — 10 municípios,
+raio declarado de 60 km, todas as fundadoras dentro dele. Isso muda premissas
+concretas de tela: distância entre lojas se mede em minutos, "buscar o carro
+hoje à tarde" é uma frase realista, e o SLA de 4 horas úteis não é otimismo. Não
+projete para uma rede nacional; projete para uma cidade e seu entorno.
+
+Cada praça futura (o produto vira SaaS por cluster) é uma rede **separada**:
+estoque, custódia e governança não se cruzam. O usuário pertence a uma praça e
+nunca vê outra — então **não há seletor de praça, nem filtro por cidade "de
+fora", nem tela de comparação entre clusters**. A praça é contexto, não escolha:
+no máximo um rótulo discreto no cabeçalho ("Curitiba e Região · 12 lojas").
 
 **Fechada no sentido literal: não existe interface para o cliente final.** Só
 lojista credenciado e logado entra. O consumidor é atendido no canal da própria
@@ -80,7 +93,7 @@ de terceiro.
 |---|---|
 | **Loja A** (dona) | "é meu, está na Veloz, disponível — posso chamar de volta" |
 | **Loja B** (com o carro) | "está comigo, posso vender agora, sem logística" |
-| **Loja C** (terceiro) | "disponível, mas está em São Paulo — preciso resolver frete" |
+| **Loja C** (terceiro) | "disponível, mas está em São José dos Pinhais — preciso buscar" |
 
 Se o design resolver isso, resolveu o produto. Se tratar como um status só, vai
 produzir uma tela que parece correta e é inutilizável.
@@ -232,8 +245,9 @@ falta. Tratar como a mesma tela com condicionais convida ao vazamento.
 
 ### P7 · Prazo em horas ÚTEIS
 
-O SLA de recall é "4 horas **úteis**" no fuso de São Paulo, seg–sex 08–18h,
-sábado 09–13h, feriados nacionais incluídos. Um pedido às 17h de sexta vence
+O SLA de recall é "4 horas **úteis**" no horário de Brasília, seg–sex 08–18h,
+sábado 09–13h, feriados nacionais **e os da praça** (19/12, Emancipação do
+Paraná; 8/9, padroeira de Curitiba). Um pedido às 17h de sexta vence
 **segunda às 11h**.
 
 Nunca mostre só "faltam 4h". Mostre o **prazo absoluto legível** ("segunda,
@@ -527,9 +541,14 @@ tela de diagnóstico, precisa dizer o que fazer com cada recusa.
 
 Não use lorem ipsum. Estes são os dados semeados pela aplicação:
 
-**Lojas fundadoras:** Prime Motors (Campinas/SP) · Veloz Seminovos (São
-Paulo/SP) · Garagem Central (Ribeirão Preto/SP) · Norte Automóveis (Curitiba/PR)
-· Sul Car (Belo Horizonte/MG) · Via Livre Veículos (Porto Alegre/RS)
+**Praça:** Curitiba e Região (PR) · 10 municípios · raio operacional 60 km
+
+**Lojas fundadoras:** Prime Motors (Curitiba/PR) · Veloz Seminovos (São José dos
+Pinhais/PR) · Garagem Central (Curitiba/PR) · Norte Automóveis (Colombo/PR) ·
+Sul Car (Araucária/PR) · Via Livre Veículos (Pinhais/PR)
+
+Todas dentro do raio — e é por isso que "a Loja B vai buscar o carro hoje à
+tarde" é uma frase que cabe na tela.
 
 **Veículos:**
 
