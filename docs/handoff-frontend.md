@@ -218,7 +218,7 @@ dinheiro entre parceiros — merecem destaque, não uma linha de log.
 
 ## 5. Superfícies a desenhar
 
-### P0 — sem isto não há produto
+### Essencial — sem isto não há produto
 
 #### 5.1 Catálogo da rede
 
@@ -324,7 +324,7 @@ que funcione só com tipografia e estrutura.
 
 ---
 
-### P1 — o produto funciona, mas manco, sem isto
+### Importante — o produto funciona, mas manco, sem isto
 
 #### 5.7 Recalls (os dois lados)
 
@@ -410,7 +410,7 @@ as coisas por telefone.
 
 ---
 
-### P2 — completa o quadro
+### Complementar — completa o quadro
 
 **Meu estoque** (`/veiculos/meus`) — onde cada carro está e quem está negociando.
 **Sincronização de feed** (`/feeds/sincronizacao`) — relatório com criados,
