@@ -139,6 +139,16 @@ E o preço líquido represado (`pendingNetPrice`) passa a valer.
               │                          │  now > dueAt        │
               │                          ├──► breachedAt marcado
               │                          │    (segue DUE)      │
+              │                          │                     │
+              │                          │ markReadyForPickup  │
+              │                          ▼                     │
+              │                  READY_FOR_PICKUP ─────────────┤
+              │                  (relógio parado;              │
+              │                   custodiante quitado)         │
+              │                          │ reopenDeadline      │
+              │                          └──► volta a DUE com  │
+              │                               os minutos que   │
+              │                               sobravam         │
               ▼                          ▼                     │
           CANCELLED ◄──────────────── CANCELLED ────────────────┘
        (venda fechou:                (desistência da dona)
@@ -157,6 +167,41 @@ função pura, sem repositório e sem relógio real:
 `fulfillRecall` encerra o recall mesmo em atraso, mas registra o atraso em
 minutos úteis. `flagBreachIfOverdue` marca o descumprimento **uma única vez**,
 apesar de o varredor rodar a cada minuto.
+
+### O escape operacional
+
+O SLA de 4 horas úteis pressupõe que o custodiante consiga transportar o carro.
+Nem sempre consegue — não há motorista, o guincho não vem, o pátio está a 60 km.
+Sem saída, o custodiante fica em atraso por um transporte que nunca teve como
+fazer, ou queima as 4 horas protegido pelo prazo enquanto a dona perde a venda.
+As duas pontas perdem.
+
+Então o recall tem **quem leva** (`fulfilment`), e as duas portas abrem de lados
+opostos:
+
+| `fulfilment` | quem escolhe | o que o prazo mede | horas úteis |
+|---|---|---|---|
+| `CUSTODIAN_DELIVERS` | padrão | entregar o carro no pátio da dona | 4 |
+| `REQUESTER_COLLECTS` | quem chamou (`electToCollect`) | deixar o carro disponível | 1 |
+
+E, no meio do prazo, o custodiante pode declarar o carro pronto para retirada
+(`markReadyForPickup`): o recall vai para `READY_FOR_PICKUP`, o relógio **para** e
+a obrigação dele se encerra ali — quem chamou vai buscar quando puder, sem
+ninguém em atraso.
+
+Três regras impedem que o escape vire uma forma de ganhar tempo:
+
+1. `electToCollect` **nunca estende** prazo: `dueAt = min(dueAt atual, agora + 1h
+   útil)`. Trocar de modalidade não compra minuto para quem já está atrasado.
+2. `markReadyForPickup` guarda os minutos úteis que sobravam
+   (`pausedRemainingMinutes`) em vez de zerá-los.
+3. `reopenDeadline` — quando quem chamou chega e o carro não está lá — **retoma**
+   com os minutos guardados, não reinicia o relógio. Declarar disponível cedo
+   demais não rende nada.
+
+`custodianObligationDischarged(recall)` é o predicado único que responde "essa
+loja ainda deve alguma coisa?" — e é ele que o varredor consulta antes de marcar
+descumprimento.
 
 ## Custódia
 
@@ -289,7 +334,7 @@ Toda transição emite evento; a trilha de auditoria é derivada deles, não esc
 | `vehicle.*` | `listed`, `unlisted`, `withdrawn`, `available_again`, `net_price_changed`, `net_price_deferred`, `neutral_photos_published` |
 | `lock.*` | `opened`, `extended`, `expired`, `released`, `converted` |
 | `custody.*` | `checked_out`, `checked_in`, `discrepancies_found`, `transfer_cancelled`, `delivered_to_consumer` |
-| `recall.*` | `requested`, `sla_started`, `fulfilled`, `sla_breached`, `superseded_by_sale`, `cancelled` |
+| `recall.*` | `requested`, `sla_started`, `collection_elected`, `ready_for_pickup`, `deadline_reopened`, `fulfilled`, `sla_breached`, `superseded_by_sale`, `cancelled` |
 | `deal.*` | `opened`, `trade_in_accepted`, `confirmed`, `settlement_registered`, `settled`, `atpv_registered`, `completed` |
 | `feed.*` | `vehicle_created`, `vehicle_updated`, `vehicle_missing`, `duplicate_vin_detected` |
 | `membership.*` | `application_opened`, `vote_cast`, `application_approved`, `application_rejected` |

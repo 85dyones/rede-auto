@@ -122,6 +122,27 @@ sexta 08:00–18:00, sábado 09:00–13:00, feriados nacionais incluindo os móv
 derivados da Páscoa. Um pedido feito sexta às 17h vence segunda de manhã, não às
 2h da madrugada de domingo.
 
+**E existe um escape operacional**, porque o prazo pressupõe motorista — e nem
+sempre há. Sem saída, a regra rígida produz o pior dos dois mundos: ou a Loja B
+fica em atraso por um transporte que nunca teve como fazer, ou queima as 4 horas
+protegida pelo prazo enquanto a Loja A perde a venda que motivou o recall.
+
+Então o prazo não mede sempre a mesma coisa:
+
+| Quem leva | O que o prazo mede | Horas úteis |
+|---|---|---|
+| `CUSTODIAN_DELIVERS` (padrão) | entregar o carro no pátio da dona | 4 |
+| `REQUESTER_COLLECTS` (quem chamou vai buscar) | **deixar o carro disponível** | 1 |
+
+E, no meio do prazo, a Loja B pode declarar o carro pronto para retirada: o
+relógio **para** e a obrigação dela termina ali — a Loja A busca quando puder,
+sem ninguém em atraso.
+
+O escape não é elástico. Optar por retirar nunca **estende** prazo
+(`min(prazo atual, agora + 1h útil)`), declarar disponível **guarda** os minutos
+que sobravam em vez de zerá-los, e se a retirada frustrar o prazo **retoma** de
+onde parou. Muda de quem é a obrigação, não o tamanho do relógio.
+
 ### 3. Custódia: o termo tem dois lados, e a responsabilidade muda no segundo
 
 A cada movimentação de pátio, um termo digital com fotos dos quatro ângulos mais
@@ -292,6 +313,9 @@ POST   /api/v1/veiculos/:id/custodia/saidas          termo de saída
 POST   /api/v1/custodia/termos/:id/entrada           termo de entrada (muda a responsabilidade)
 GET    /api/v1/veiculos/:id/custodia/responsavel?em= quem respondia naquela data
 POST   /api/v1/veiculos/:id/recall                   chamada de retorno
+POST   /api/v1/recalls/:id/retirada                  "eu retiro": muda quem leva
+POST   /api/v1/recalls/:id/disponivel                carro pronto; o relógio para
+POST   /api/v1/recalls/:id/reabrir-prazo             retirada frustrada; o prazo retoma
 POST   /api/v1/veiculos/:id/negociacao               monta o repasse sobre a trava
 POST   /api/v1/negociacoes/:id/confirmacao           fecha a venda
 POST   /api/v1/veiculos/:id/entrega                  entrega ao comprador (encerra os dois eixos)
@@ -335,7 +359,7 @@ entregue aqui:
   tabela de travas: sem ele, duas lojas podem ler `AVAILABLE` ao mesmo tempo e
   ambas travar — que é precisamente o problema que a plataforma existe para
   eliminar. Detalhes e os outros três pontos de corrida em
-  [`decisoes.md`](docs/decisoes.md#17-concorrência-o-que-muda-quando-sair-da-memória).
+  [`decisoes.md`](docs/decisoes.md#22-concorrência-o-que-muda-quando-sair-da-memória).
 - **autenticação de produção.** A chave de API é adaptador de desenvolvimento:
   falta rotação, revogação, escopo por chave (uma chave de integração de feed
   não deveria poder fechar venda) e limite de requisições.

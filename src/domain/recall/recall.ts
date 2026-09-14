@@ -28,6 +28,7 @@ import type { CustodyTransferId, DealId, RecallId, StoreId, UserId } from '../sh
 import {
   type BusinessCalendar,
   addBusinessHours,
+  addBusinessMinutes,
   businessMinutesBetween,
 } from '../shared/business-hours.ts';
 import { type Vehicle, CommercialStatus, PhysicalState } from '../vehicle/vehicle.ts';
@@ -35,8 +36,13 @@ import { type Vehicle, CommercialStatus, PhysicalState } from '../vehicle/vehicl
 export const RecallStatus = {
   /** Aceito, mas represado por trava comercial ativa de outra loja. */
   WAITING_LOCK_RELEASE: 'WAITING_LOCK_RELEASE',
-  /** SLA correndo: a loja custodiante deve disponibilizar o retorno. */
+  /** SLA correndo: a loja custodiante deve cumprir a obrigacao dela. */
   DUE: 'DUE',
+  /**
+   * O custodiante disponibilizou o veiculo e a parte interessada vem busca-lo.
+   * O relogio do custodiante para aqui: a obrigacao dele acabou.
+   */
+  READY_FOR_PICKUP: 'READY_FOR_PICKUP',
   /** Veiculo devolvido (termo de custodia de retorno concluido). */
   FULFILLED: 'FULFILLED',
   /** Cancelado pela propria loja proprietaria, ou porque o carro foi vendido. */
@@ -61,11 +67,44 @@ export const RecallCancelReason = {
 } as const;
 export type RecallCancelReason = (typeof RecallCancelReason)[keyof typeof RecallCancelReason];
 
+/**
+ * Quem leva o carro de volta.
+ *
+ * A distincao existe porque o prazo de 4 horas cobre coisas muito diferentes.
+ * Providenciar transporte depende de guincho, motorista e transito; deixar um
+ * carro pronto no patio, com chave e alguem para assinar, e questao de minutos.
+ * Sem separar as duas, o custodiante sem motorista fica legitimamente coberto
+ * pelas 4 horas enquanto o cliente do interessado vai embora.
+ */
+export const RecallFulfilment = {
+  /** Padrao: a loja custodiante providencia o transporte. */
+  CUSTODIAN_DELIVERS: 'CUSTODIAN_DELIVERS',
+  /**
+   * Escape operacional: a parte interessada vai ate a loja buscar o carro.
+   * O custodiante so precisa disponibiliza-lo — prazo bem mais curto, porque a
+   * obrigacao tambem e bem menor.
+   */
+  REQUESTER_COLLECTS: 'REQUESTER_COLLECTS',
+} as const;
+export type RecallFulfilment = (typeof RecallFulfilment)[keyof typeof RecallFulfilment];
+
 export type RecallPolicy = {
-  /** Horas UTEIS para disponibilizar o retorno. 4, por contrato de rede. */
+  /** Horas UTEIS para o custodiante entregar o veiculo. 4, por contrato de rede. */
   readonly slaBusinessHours: number;
+  /**
+   * Horas UTEIS para apenas DISPONIBILIZAR o veiculo, quando o interessado vem
+   * buscar. Menor de proposito: nao ha transporte a organizar.
+   */
+  readonly pickupReadinessBusinessHours: number;
   readonly calendar: BusinessCalendar;
 };
+
+/** Quanto tempo o custodiante tem, conforme a obrigacao que lhe cabe. */
+export function slaHoursFor(fulfilment: RecallFulfilment, policy: RecallPolicy): number {
+  return fulfilment === RecallFulfilment.REQUESTER_COLLECTS
+    ? policy.pickupReadinessBusinessHours
+    : policy.slaBusinessHours;
+}
 
 export type Recall = {
   readonly id: RecallId;
@@ -78,6 +117,8 @@ export type Recall = {
   readonly note: string | null;
   readonly requestedAt: Instant;
   readonly status: RecallStatus;
+  /** Quem leva o carro de volta. Define qual prazo vale. */
+  readonly fulfilment: RecallFulfilment;
   /** Trava que segurou o inicio do SLA, se houve. */
   readonly blockedByLockId: string | null;
   /** Quando o SLA comecou a correr. `null` enquanto aguarda a trava. */
@@ -86,6 +127,13 @@ export type Recall = {
   readonly dueAt: Instant | null;
   readonly fulfilledAt: Instant | null;
   readonly fulfilledByTransferId: CustodyTransferId | null;
+  readonly readyForPickupAt: Instant | null;
+  /**
+   * Minutos uteis que restavam quando o relogio parou. Se o interessado chegar
+   * e o carro nao estiver disponivel, o prazo volta a correr DAQUI — nao
+   * reinicia, para a declaracao de disponibilidade nao virar prazo extra.
+   */
+  readonly pausedRemainingMinutes: number | null;
   readonly cancelledAt: Instant | null;
   readonly cancelReason: RecallCancelReason | null;
   /** Marcado pelo varredor no primeiro instante em que o SLA venceu. */
@@ -158,6 +206,8 @@ export type RequestRecallCommand = {
   readonly requestedByUserId: UserId;
   readonly reason: RecallReason;
   readonly note?: string | undefined;
+  /** Padrao: o custodiante entrega. O interessado pode ja optar por buscar. */
+  readonly fulfilment?: RecallFulfilment | undefined;
   readonly activeLock: ActiveLockView | null;
   readonly openRecall: Recall | null;
   readonly now: Instant;
@@ -211,6 +261,7 @@ export function requestRecall(command: RequestRecallCommand): Transition<Recall>
   const ruling = resolvePriority(vehicle, activeLock, now);
   const blockedByLock = ruling.holder === PriorityHolder.LOCK_HOLDER;
 
+  const fulfilment = command.fulfilment ?? RecallFulfilment.CUSTODIAN_DELIVERS;
   const base = {
     id: command.recallId,
     vehicleId: vehicle.id,
@@ -220,8 +271,11 @@ export function requestRecall(command: RequestRecallCommand): Transition<Recall>
     reason: command.reason,
     note: command.note?.trim() ?? null,
     requestedAt: now,
+    fulfilment,
     fulfilledAt: null,
     fulfilledByTransferId: null,
+    readyForPickupAt: null,
+    pausedRemainingMinutes: null,
     cancelledAt: null,
     cancelReason: null,
     breachedAt: null,
@@ -241,13 +295,14 @@ export function requestRecall(command: RequestRecallCommand): Transition<Recall>
         status: recall.status,
         custodianStoreId: recall.custodianStoreId,
         reason: command.reason,
+        fulfilment,
         blockedByLockId: recall.blockedByLockId,
         lockExpiresAt: activeLock?.expiresAt ?? null,
       }),
     ]);
   }
 
-  const dueAt = addBusinessHours(now, policy.slaBusinessHours, policy.calendar);
+  const dueAt = addBusinessHours(now, slaHoursFor(fulfilment, policy), policy.calendar);
   const recall: Recall = {
     ...base,
     status: RecallStatus.DUE,
@@ -262,8 +317,9 @@ export function requestRecall(command: RequestRecallCommand): Transition<Recall>
       status: recall.status,
       custodianStoreId: recall.custodianStoreId,
       reason: command.reason,
+      fulfilment,
       dueAt,
-      slaBusinessHours: policy.slaBusinessHours,
+      slaBusinessHours: slaHoursFor(fulfilment, policy),
     }),
   ]);
 }
@@ -286,7 +342,7 @@ export function startSlaAfterLockRelease(
 ): Transition<Recall> {
   if (recall.status !== RecallStatus.WAITING_LOCK_RELEASE) return unchanged(recall);
 
-  const dueAt = addBusinessHours(now, policy.slaBusinessHours, policy.calendar);
+  const dueAt = addBusinessHours(now, slaHoursFor(recall.fulfilment, policy), policy.calendar);
   const started: Recall = { ...recall, status: RecallStatus.DUE, slaStartedAt: now, dueAt };
 
   return transitioned(started, [
@@ -294,7 +350,7 @@ export function startSlaAfterLockRelease(
       recallId: recall.id,
       custodianStoreId: recall.custodianStoreId,
       dueAt,
-      slaBusinessHours: policy.slaBusinessHours,
+      slaBusinessHours: slaHoursFor(recall.fulfilment, policy),
       releasedLockId: recall.blockedByLockId,
     }),
   ]);
@@ -421,6 +477,212 @@ export function supersedeByRecallSale(recall: Recall, dealId: DealId, now: Insta
   );
 }
 
+export type ElectToCollectCommand = {
+  readonly recall: Recall;
+  readonly actorStoreId: StoreId;
+  readonly now: Instant;
+  readonly policy: RecallPolicy;
+};
+
+/**
+ * A parte interessada decide ir buscar o carro.
+ *
+ * E decisao unilateral dela, sem precisar de aceite: trocar entrega por
+ * retirada so ALIVIA o custodiante — ele deixa de ter que organizar transporte
+ * e passa a so disponibilizar o veiculo. Exigir concordancia para reduzir a
+ * obrigacao de alguem seria burocracia sem proposito.
+ *
+ * O novo prazo nunca e mais longo que o anterior. Trocar de modalidade serve
+ * para agilizar; se pudesse esticar o prazo, viraria a saida preferida de quem
+ * esta atrasado.
+ */
+export function electToCollect(command: ElectToCollectCommand): Transition<Recall> {
+  const { recall, now, policy } = command;
+
+  if (!isOpen(recall)) {
+    return err(
+      conflictError('RECALL_NOT_OPEN', 'Este recall ja foi encerrado.', {
+        recallId: recall.id,
+        status: recall.status,
+      }),
+    );
+  }
+  if (command.actorStoreId !== recall.requestedByStoreId) {
+    return err(
+      forbiddenError(
+        'NOT_RECALL_REQUESTER',
+        'Somente a loja que chamou o veiculo pode optar por ir busca-lo.',
+        { recallId: recall.id },
+      ),
+    );
+  }
+  if (recall.fulfilment === RecallFulfilment.REQUESTER_COLLECTS) {
+    return unchanged(recall);
+  }
+
+  // Enquanto a trava segura o recall nao ha prazo a recalcular: a modalidade
+  // fica registrada e vale quando o relogio comecar.
+  if (recall.dueAt === null) {
+    return transitioned(
+      { ...recall, fulfilment: RecallFulfilment.REQUESTER_COLLECTS },
+      [collectionElected(recall, null, now)],
+    );
+  }
+
+  const shortened = addBusinessHours(
+    now,
+    policy.pickupReadinessBusinessHours,
+    policy.calendar,
+  );
+  const dueAt = Math.min(recall.dueAt, shortened);
+
+  return transitioned(
+    { ...recall, fulfilment: RecallFulfilment.REQUESTER_COLLECTS, dueAt },
+    [collectionElected(recall, dueAt, now)],
+  );
+}
+
+function collectionElected(recall: Recall, dueAt: Instant | null, now: Instant): DomainEvent {
+  return domainEvent('recall.collection_elected', recall.vehicleId, now, {
+    recallId: recall.id,
+    custodianStoreId: recall.custodianStoreId,
+    requestedByStoreId: recall.requestedByStoreId,
+    dueAt,
+  });
+}
+
+export type MarkReadyForPickupCommand = {
+  readonly recall: Recall;
+  readonly actorStoreId: StoreId;
+  readonly note?: string | undefined;
+  readonly now: Instant;
+  readonly policy: RecallPolicy;
+};
+
+/**
+ * O custodiante declara o veiculo disponivel para retirada: chave em maos,
+ * carro acessivel, alguem no patio para assinar a saida.
+ *
+ * E aqui que o escape fecha o circuito. A obrigacao do custodiante termina
+ * neste ponto e o relogio dele para — o que vier depois depende de quando o
+ * interessado aparecer, e cobrar disso o custodiante seria injusto.
+ *
+ * Para a declaracao nao virar passe livre, ela e reversivel: se o interessado
+ * chegar e o carro nao estiver la, `reopenDeadline` retoma o prazo de onde
+ * parou. Declarar cedo demais nao ganha tempo, so adia a conta.
+ */
+export function markReadyForPickup(command: MarkReadyForPickupCommand): Transition<Recall> {
+  const { recall, now, policy } = command;
+
+  if (recall.status !== RecallStatus.DUE) {
+    return err(
+      conflictError(
+        'RECALL_NOT_DUE',
+        recall.status === RecallStatus.READY_FOR_PICKUP
+          ? 'Este veiculo ja esta disponivel para retirada.'
+          : 'Este recall nao esta com prazo em curso.',
+        { recallId: recall.id, status: recall.status },
+      ),
+    );
+  }
+  if (command.actorStoreId !== recall.custodianStoreId) {
+    return err(
+      forbiddenError(
+        'NOT_CUSTODIAN',
+        'Somente a loja que esta com o veiculo pode declara-lo disponivel.',
+        { recallId: recall.id, custodianStoreId: recall.custodianStoreId },
+      ),
+    );
+  }
+
+  // Ja atrasado no momento da declaracao? Entao nao resta nada a pausar, e
+  // reabrir devolve o prazo vencido — o atraso ja aconteceu.
+  const remaining =
+    recall.dueAt === null || now >= recall.dueAt
+      ? 0
+      : businessMinutesBetween(now, recall.dueAt, policy.calendar);
+
+  return transitioned(
+    {
+      ...recall,
+      status: RecallStatus.READY_FOR_PICKUP,
+      fulfilment: RecallFulfilment.REQUESTER_COLLECTS,
+      readyForPickupAt: now,
+      pausedRemainingMinutes: remaining,
+    },
+    [
+      domainEvent('recall.ready_for_pickup', recall.vehicleId, now, {
+        recallId: recall.id,
+        custodianStoreId: recall.custodianStoreId,
+        requestedByStoreId: recall.requestedByStoreId,
+        note: command.note?.trim() ?? null,
+        remainingBusinessMinutes: remaining,
+        wasLate: remaining === 0 && recall.dueAt !== null && now > recall.dueAt,
+      }),
+    ],
+  );
+}
+
+export type ReopenDeadlineCommand = {
+  readonly recall: Recall;
+  readonly actorStoreId: StoreId;
+  readonly reason: string;
+  readonly now: Instant;
+  readonly policy: RecallPolicy;
+};
+
+/**
+ * O interessado foi buscar e o carro nao estava disponivel.
+ *
+ * O prazo volta a correr com o que RESTAVA quando parou, nao reiniciado: a
+ * declaracao indevida nao pode render tempo extra ao custodiante, nem punir
+ * alem do que ele ja devia.
+ */
+export function reopenDeadline(command: ReopenDeadlineCommand): Transition<Recall> {
+  const { recall, now, policy } = command;
+
+  if (recall.status !== RecallStatus.READY_FOR_PICKUP) {
+    return err(
+      conflictError(
+        'RECALL_NOT_AWAITING_PICKUP',
+        'Este recall nao esta aguardando retirada.',
+        { recallId: recall.id, status: recall.status },
+      ),
+    );
+  }
+  if (command.actorStoreId !== recall.requestedByStoreId) {
+    return err(
+      forbiddenError(
+        'NOT_RECALL_REQUESTER',
+        'Somente a loja que foi buscar o veiculo pode reabrir o prazo.',
+        { recallId: recall.id },
+      ),
+    );
+  }
+
+  const remaining = recall.pausedRemainingMinutes ?? 0;
+  const dueAt = addBusinessMinutes(now, remaining, policy.calendar);
+
+  return transitioned(
+    {
+      ...recall,
+      status: RecallStatus.DUE,
+      dueAt,
+      readyForPickupAt: null,
+      pausedRemainingMinutes: null,
+    },
+    [
+      domainEvent('recall.deadline_reopened', recall.vehicleId, now, {
+        recallId: recall.id,
+        custodianStoreId: recall.custodianStoreId,
+        reason: command.reason,
+        restoredBusinessMinutes: remaining,
+        dueAt,
+      }),
+    ],
+  );
+}
+
 /**
  * Marca o descumprimento do SLA na primeira vez que ele e detectado.
  * Idempotente: o varredor roda a cada minuto e so o primeiro passa.
@@ -446,8 +708,15 @@ export function flagBreachIfOverdue(recall: Recall, now: Instant): Transition<Re
 
 export function isOpen(recall: Recall): boolean {
   return (
-    recall.status === RecallStatus.WAITING_LOCK_RELEASE || recall.status === RecallStatus.DUE
+    recall.status === RecallStatus.WAITING_LOCK_RELEASE ||
+    recall.status === RecallStatus.DUE ||
+    recall.status === RecallStatus.READY_FOR_PICKUP
   );
+}
+
+/** O custodiante ja cumpriu a parte dele? Em retirada, disponibilizar basta. */
+export function custodianObligationDischarged(recall: Recall): boolean {
+  return recall.status === RecallStatus.READY_FOR_PICKUP || recall.status === RecallStatus.FULFILLED;
 }
 
 export function isOverdue(recall: Recall, now: Instant): boolean {

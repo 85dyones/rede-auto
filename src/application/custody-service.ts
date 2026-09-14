@@ -37,8 +37,12 @@ import { type CustodyPeriod, attributeInfraction, buildCustodyLedger } from '../
 import {
   type ActiveLockView,
   type Recall,
+  type RecallFulfilment,
   type RecallReason,
   cancelRecall,
+  electToCollect,
+  markReadyForPickup,
+  reopenDeadline,
   flagBreachIfOverdue,
   fulfillRecall,
   isOpen as isRecallOpen,
@@ -277,6 +281,8 @@ export type RequestRecallInput = {
   readonly vehicleId: VehicleId;
   readonly reason: RecallReason;
   readonly note?: string | undefined;
+  /** Quem leva o carro. Padrao: o custodiante entrega. */
+  readonly fulfilment?: RecallFulfilment | undefined;
 };
 
 export async function requestVehicleRecall(
@@ -306,6 +312,7 @@ export async function requestVehicleRecall(
     requestedByUserId: actor.user.id,
     reason: input.reason,
     note: input.note,
+    fulfilment: input.fulfilment,
     activeLock,
     openRecall: existing ?? null,
     now: context.clock.now(),
@@ -330,6 +337,91 @@ export async function withdrawRecall(
     recall,
     actorStoreId: actor.store.id,
     now: context.clock.now(),
+  });
+  if (!transition.ok) return transition;
+
+  await context.repos.recalls.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+  return ok(transition.value.state);
+}
+
+/**
+ * A parte interessada opta por ir buscar o carro.
+ *
+ * O escape operacional: quando o custodiante nao tem como levar e esta coberto
+ * pelo prazo, quem precisa do carro vai ate la. So alivia o custodiante, entao
+ * nao depende de aceite dele.
+ */
+export async function electRecallCollection(
+  context: AppContext,
+  actor: Actor,
+  recallId: RecallId,
+): Promise<Result<Recall, DomainError>> {
+  const recall = await context.repos.recalls.byId(recallId);
+  if (recall === undefined) return err(recallNotFound(recallId));
+
+  const transition = electToCollect({
+    recall,
+    actorStoreId: actor.store.id,
+    now: context.clock.now(),
+    policy: context.policies.recall,
+  });
+  if (!transition.ok) return transition;
+
+  await context.repos.recalls.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+  return ok(transition.value.state);
+}
+
+/** O custodiante declara o veiculo pronto para retirada. Encerra a obrigacao dele. */
+export async function markRecallReadyForPickup(
+  context: AppContext,
+  actor: Actor,
+  recallId: RecallId,
+  note?: string,
+): Promise<Result<Recall, DomainError>> {
+  if (!hasManagerPowers(actor.user)) {
+    return err(
+      forbiddenError(
+        'MANAGER_ROLE_REQUIRED',
+        'Somente gerente ou titular declara o veiculo disponivel para retirada.',
+      ),
+    );
+  }
+
+  const recall = await context.repos.recalls.byId(recallId);
+  if (recall === undefined) return err(recallNotFound(recallId));
+
+  const transition = markReadyForPickup({
+    recall,
+    actorStoreId: actor.store.id,
+    note,
+    now: context.clock.now(),
+    policy: context.policies.recall,
+  });
+  if (!transition.ok) return transition;
+
+  await context.repos.recalls.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+  return ok(transition.value.state);
+}
+
+/** Foi buscar e o carro nao estava la: o prazo volta a correr de onde parou. */
+export async function reopenRecallDeadline(
+  context: AppContext,
+  actor: Actor,
+  recallId: RecallId,
+  reason: string,
+): Promise<Result<Recall, DomainError>> {
+  const recall = await context.repos.recalls.byId(recallId);
+  if (recall === undefined) return err(recallNotFound(recallId));
+
+  const transition = reopenDeadline({
+    recall,
+    actorStoreId: actor.store.id,
+    reason,
+    now: context.clock.now(),
+    policy: context.policies.recall,
   });
   if (!transition.ok) return transition;
 

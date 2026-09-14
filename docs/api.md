@@ -16,7 +16,7 @@ usuário)** — o papel do usuário decide o que ele pode fazer.
 plataforma, e não há superfície voltada a ele.
 
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
-> [`decisoes.md`](decisoes.md#17-o-que-ficou-de-fora-e-por-quê).
+> [`decisoes.md`](decisoes.md#23-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
@@ -310,7 +310,7 @@ Fora do intervalo conhecido devolve `resolvido: false` com
 ### `POST /api/v1/veiculos/:id/recall`
 
 ```jsonc
-{ "motivo": "OWN_SALE", "observacao": "Cliente fechou aqui." }
+{ "motivo": "OWN_SALE", "observacao": "Cliente fechou aqui.", "euRetiro": false }
 ```
 
 Motivos: `OWN_SALE`, `YARD_RETURN`, `MAINTENANCE`, `OTHER`.
@@ -323,11 +323,70 @@ Motivos: `OWN_SALE`, `YARD_RETURN`, `MAINTENANCE`, `OTHER`.
 Quando a trava cai, o SLA começa **dali**. Se a negociação travada fechar, o
 recall vira `CANCELLED` com `SUPERSEDED_BY_SALE`.
 
+`euRetiro: true` já nasce o recall como `REQUESTER_COLLECTS`: quem chamou vai
+buscar, e o prazo passa a medir **deixar o carro disponível** (1h útil) em vez de
+entregá-lo (4h úteis).
+
+### `POST /api/v1/recalls/:id/retirada`
+
+Sem corpo. Só **quem pediu o recall**. Troca `quemLeva` para
+`REQUESTER_COLLECTS` depois do pedido — para quando a loja custodiante avisa que
+não tem como levar.
+
+O prazo nunca cresce: `prazoFinal = min(prazoFinal atual, agora + 1h útil)`.
+Trocar de modalidade não compra tempo para quem já está atrasado.
+
+Chamar duas vezes é inócuo — o recall já está em `REQUESTER_COLLECTS` e a
+resposta é a mesma, sem novo evento.
+
+| Erro | Quando |
+|---|---|
+| `NOT_RECALL_REQUESTER` (403) | quem chamou o carro não foi você |
+| `RECALL_NOT_OPEN` (409) | recall já cumprido ou cancelado |
+
+Se o recall ainda está em `WAITING_LOCK_RELEASE`, a modalidade fica registrada e
+passa a valer quando a trava cair e o relógio começar.
+
+### `POST /api/v1/recalls/:id/disponivel`
+
+```jsonc
+{ "observacao": "Sem motorista hoje. Carro na frente, chave na recepção." }
+```
+
+Só a **loja custodiante**, e só com o recall em `DUE`. O recall vai para
+`READY_FOR_PICKUP`, o relógio **para** e a obrigação da custodiante termina ali:
+o varredor deixa de contá-la como candidata a descumprimento.
+
+O que sobrava do prazo fica guardado em `minutosUteisPausados` — não é zerado.
+
+| Erro | Quando |
+|---|---|
+| `NOT_CUSTODIAN` (403) | o carro não está no seu pátio |
+| `RECALL_NOT_DUE` (409) | recall ainda preso pela trava, ou já encerrado |
+
+### `POST /api/v1/recalls/:id/reabrir-prazo`
+
+```jsonc
+{ "motivo": "Fui buscar às 14h e o carro não estava disponível." }
+```
+
+Só **quem pediu o recall**, e só a partir de `READY_FOR_PICKUP`. Volta para `DUE`
+**retomando** `minutosUteisPausados` — não reinicia o relógio. Declarar
+disponível cedo demais não rende nada à custodiante.
+
+| Erro | Quando |
+|---|---|
+| `NOT_RECALL_REQUESTER` (403) | quem chamou o carro não foi você |
+| `RECALL_NOT_AWAITING_PICKUP` (409) | o recall não está em `READY_FOR_PICKUP` |
+
 ### `GET /api/v1/recalls`
 
 ```jsonc
 { "devoDevolver": [ /* … */ ], "estouEsperando": [ /* … */ ] }
 ```
+
+Cada recall traz `quemLeva` (`CUSTODIAN_DELIVERS` | `REQUESTER_COLLECTS`),
+`disponivelParaRetiradaEm` e `minutosUteisPausados`.
 
 ---
 
@@ -603,6 +662,9 @@ Quem recebe o quê:
 | `feed.vehicle_created` | toda a rede, menos quem publicou | INFO |
 | `recall.requested` | loja custodiante | ACTION_REQUIRED |
 | `recall.sla_started` | loja custodiante | ACTION_REQUIRED |
+| `recall.collection_elected` | loja custodiante | ACTION_REQUIRED |
+| `recall.ready_for_pickup` | loja que chamou | ACTION_REQUIRED |
+| `recall.deadline_reopened` | loja custodiante | ALERT |
 | `recall.sla_breached` | custodiante e proprietária | ALERT |
 | `recall.superseded_by_sale` | loja proprietária | INFO |
 | `deal.confirmed` / `deal.settled` | loja proprietária | ACTION_REQUIRED / INFO |

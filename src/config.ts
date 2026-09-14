@@ -50,7 +50,12 @@ export function defaultPolicies(referenceYear?: number): NetworkPolicies {
   return {
     governance: DEFAULT_GOVERNANCE_POLICY,
     lock: DEFAULT_LOCK_POLICY,
-    recall: { slaBusinessHours: 4, calendar: defaultCalendar(referenceYear) },
+    recall: {
+      slaBusinessHours: 4,
+      // Disponibilizar um carro no patio nao e organizar transporte.
+      pickupReadinessBusinessHours: 1,
+      calendar: defaultCalendar(referenceYear),
+    },
     custody: DEFAULT_CUSTODY_POLICY,
   };
 }

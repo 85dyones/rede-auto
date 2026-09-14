@@ -108,6 +108,30 @@ function draftFor(event: DomainEvent): Draft | null {
         to: [store('custodianStoreId')],
       };
 
+    case 'recall.collection_elected':
+      return {
+        severity: NotificationSeverity.ACTION_REQUIRED,
+        title: 'A loja proprietaria vem buscar o veiculo',
+        body: 'Voce nao precisa organizar transporte — basta deixar o carro disponivel, com chave e alguem para assinar a saida.',
+        to: [store('custodianStoreId')],
+      };
+
+    case 'recall.ready_for_pickup':
+      return {
+        severity: NotificationSeverity.ACTION_REQUIRED,
+        title: 'Veiculo disponivel para retirada',
+        body: 'A loja que esta com o carro o deixou pronto. O prazo dela parou aqui: agora depende de voce buscar.',
+        to: [store('requestedByStoreId')],
+      };
+
+    case 'recall.deadline_reopened':
+      return {
+        severity: NotificationSeverity.ALERT,
+        title: 'Retirada frustrada: o prazo voltou a correr',
+        body: 'A loja foi buscar o veiculo e ele nao estava disponivel. O prazo retomou de onde havia parado.',
+        to: [store('custodianStoreId')],
+      };
+
     case 'recall.sla_breached':
       return {
         severity: NotificationSeverity.ALERT,

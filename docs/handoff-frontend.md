@@ -240,6 +240,32 @@ Nunca mostre só "faltam 4h". Mostre o **prazo absoluto legível** ("segunda,
 11:00") e, ao lado, o tempo útil restante. Um contador regressivo cru atravessa
 a madrugada e o fim de semana mentindo.
 
+**E o contador nem sempre está contando.** O prazo pressupõe que o custodiante
+consiga transportar o carro, e nem sempre consegue — não há motorista, o guincho
+não vem. Existe um escape, e ele muda **o que o prazo mede**:
+
+| `quemLeva` | O prazo mede | Horas úteis |
+|---|---|---|
+| `CUSTODIAN_DELIVERS` (padrão) | entregar no pátio de quem chamou | 4 |
+| `REQUESTER_COLLECTS` | deixar o carro **disponível** | 1 |
+
+E a situação `READY_FOR_PICKUP` **para o relógio**: o custodiante declarou o carro
+pronto e a obrigação dele acabou ali.
+
+Para o design, três estados visuais distintos, não um contador com variações:
+
+- **correndo** (`DUE`) — contador vivo + prazo absoluto. Urgência.
+- **parado** (`READY_FOR_PICKUP`) — sem contador. Para o custodiante é alívio
+  ("você já cumpriu"); para quem chamou é uma ação ("o carro está esperando por
+  você"). Mesma situação, dois tons — a tela sabe qual loja está olhando.
+- **sem prazo** (`WAITING_LOCK_RELEASE`) — `prazoFinal: null`. Nunca renderize
+  "00:00" aqui; o relógio ainda não começou.
+
+O campo `minutosUteisPausados` é o que sobrava quando o relógio parou. Não o
+exiba cru — ele existe porque, se a retirada frustrar, o prazo **retoma** desses
+minutos em vez de reiniciar. Se for mostrar algo, mostre a consequência: "restam
+2h30 úteis se o prazo voltar a correr".
+
 ### P8 · A vistoria é feita em pé, no pátio
 
 O termo de custódia exige **cinco fotos obrigatórias** (frente, traseira,
@@ -390,9 +416,26 @@ com tipografia e estrutura, listando o material fotográfico que acompanha.
 emocionais opostos na mesma tela — a obrigação e a espera. Ver P4 e P7.
 
 Situações: `WAITING_LOCK_RELEASE` (sem prazo ainda) · `DUE` (correndo) ·
-`FULFILLED` · `CANCELLED` (com `motivoCancelamento` — `SUPERSEDED_BY_SALE`
-significa "o carro foi vendido, virou dinheiro em vez de voltar"). O campo
-`descumpridoEm` marca SLA estourado.
+`READY_FOR_PICKUP` (relógio parado, carro esperando) · `FULFILLED` · `CANCELLED`
+(com `motivoCancelamento` — `SUPERSEDED_BY_SALE` significa "o carro foi vendido,
+virou dinheiro em vez de voltar"). O campo `descumpridoEm` marca SLA estourado.
+
+As três ações do escape (ver P7) são botões de contexto, e **cada uma pertence a
+um lado só**:
+
+| Ação | Rota | Quem vê o botão | Quando |
+|---|---|---|---|
+| "Eu retiro" | `POST /recalls/:id/retirada` | quem chamou (`estouEsperando`) | recall aberto |
+| "Carro disponível" | `POST /recalls/:id/disponivel` | custodiante (`devoDevolver`) | situação `DUE` |
+| "Fui buscar e não estava" | `POST /recalls/:id/reabrir-prazo` | quem chamou | situação `READY_FOR_PICKUP` |
+
+"Eu retiro" também pode ser marcado já no pedido do recall (`euRetiro: true` em
+`POST /veiculos/:id/recall`) — é o caso do lojista que está com o cliente na
+mesa e não vai esperar transporte alheio.
+
+A terceira é uma reclamação, e o tom importa: quem a aperta foi até a outra loja
+e voltou de mãos vazias. Exija o `motivo` (é obrigatório na API) e deixe claro na
+confirmação que o prazo **retoma** — a outra loja recebe alerta.
 
 #### 5.8 Negociação — e são **duas** telas
 
@@ -587,7 +630,7 @@ responder, olhando as telas:
 O caminho mais curto para ver o sistema funcionando:
 
 ```bash
-npm install && npm run demo    # 17 atos narrados, a operação inteira
+npm install && npm run demo    # 18 atos narrados, a operação inteira
 npm start                      # API em :3000, rede semeada, chaves no console
 ```
 

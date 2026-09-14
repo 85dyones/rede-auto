@@ -61,6 +61,11 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Recall | `Recall` | chamada de retorno do veículo pela loja proprietária. |
 | SLA | `slaBusinessHours` | 4 horas **úteis** para liberar o retorno, contadas no calendário da rede. |
 | Aguardando trava | `WAITING_LOCK_RELEASE` | recall aceito mas represado: há trava ativa de terceiro e o prazo ainda não corre. |
+| Quem leva | `fulfilment` | de quem é o transporte. Muda o que o prazo mede — e, portanto, de quem é a obrigação. |
+| Custodiante entrega | `CUSTODIAN_DELIVERS` | modalidade padrão: quem está com o carro leva até o pátio da dona. 4h úteis. |
+| Quem chamou retira | `REQUESTER_COLLECTS` | o escape: quem pediu vai buscar. O prazo passa a medir só deixar o carro disponível — 1h útil. |
+| Disponível para retirada | `READY_FOR_PICKUP` | o custodiante deixou o carro pronto. O relógio para e a obrigação dele acaba aqui. |
+| Minutos pausados | `pausedRemainingMinutes` | o que sobrava do prazo quando o relógio parou. Se a retirada frustrar, retoma daí — não reinicia. |
 | Superado pela venda | `SUPERSEDED_BY_SALE` | a negociação travada fechou. Não há o que devolver: o carro virou dinheiro. |
 
 ## Documentação e qualificação

@@ -526,6 +526,103 @@ describe('estoque avancado, expiracao e recall', () => {
   });
 });
 
+describe('escape operacional do recall', () => {
+  let vehicleId: string;
+  let recallId: string;
+
+  test('a Loja A chama o Corolla de volta com prazo de entrega', async () => {
+    const catalog = await api<{ veiculos: Array<{ id: string }> }>('GET', '/api/v1/veiculos?marca=Toyota', {
+      key: CENTRAL,
+    });
+    vehicleId = catalog.body.veiculos[0]?.id as string;
+
+    const saida = await api<{ termo: { id: string } }>(
+      'POST',
+      `/api/v1/veiculos/${vehicleId}/custodia/saidas`,
+      {
+        key: 'demo_central_titular',
+        body: {
+          lojaDestinoId: 'str_veloz',
+          finalidade: 'EXTENDED_STOCK',
+          vistoria: vistoria(61_800),
+          responsavel,
+        },
+      },
+    );
+    await api('POST', `/api/v1/custodia/termos/${saida.body.termo.id}/entrada`, {
+      key: VELOZ,
+      body: { vistoria: vistoria(61_830), responsavel },
+    });
+
+    const recall = await api<{ recall: { id: string; quemLeva: string; prazoFinal: string } }>(
+      'POST',
+      `/api/v1/veiculos/${vehicleId}/recall`,
+      { key: 'demo_central_titular', body: { motivo: 'OWN_SALE' } },
+    );
+    assert.equal(recall.status, 201);
+    recallId = recall.body.recall.id;
+    assert.equal(recall.body.recall.quemLeva, 'CUSTODIAN_DELIVERS');
+  });
+
+  test('a Loja B nao tem como levar e declara o carro disponivel', async () => {
+    // O escape: em vez de queimar as 4 horas sem motorista, ela avisa que o
+    // carro esta pronto e a obrigacao dela termina ali.
+    const response = await api<{
+      recall: { situacao: string; minutosUteisPausados: number; quemLeva: string };
+    }>('POST', `/api/v1/recalls/${recallId}/disponivel`, {
+      key: VELOZ,
+      body: { observacao: 'Sem motorista hoje, carro na frente com a chave na recepcao' },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.recall.situacao, 'READY_FOR_PICKUP');
+    assert.equal(response.body.recall.quemLeva, 'REQUESTER_COLLECTS');
+    assert.ok(response.body.recall.minutosUteisPausados > 0, 'o relogio parou com tempo de sobra');
+  });
+
+  test('a Loja A e avisada de que pode buscar', async () => {
+    const avisos = await api<{ avisos: Array<{ tipo: string; urgencia: string }> }>(
+      'GET',
+      '/api/v1/notificacoes',
+      { key: 'demo_central_titular' },
+    );
+    const aviso = avisos.body.avisos.find((a) => a.tipo === 'recall.ready_for_pickup');
+    assert.ok(aviso, 'quem vai buscar precisa saber');
+    assert.equal(aviso.urgencia, 'ACTION_REQUIRED');
+  });
+
+  test('com o relogio parado, a varredura nao acusa descumprimento', async () => {
+    clock.advance(30 * HOUR);
+    const varredura = await api<{ recallsDescumpridos: number }>(
+      'POST',
+      '/api/v1/manutencao/varredura',
+      { key: PRIME },
+    );
+    assert.equal(varredura.body.recallsDescumpridos, 0, 'o custodiante ja fez a parte dele');
+  });
+
+  test('foi buscar e o carro nao estava: o prazo retoma de onde parou', async () => {
+    const response = await api<{ recall: { situacao: string; prazoFinal: string } }>(
+      'POST',
+      `/api/v1/recalls/${recallId}/reabrir-prazo`,
+      { key: 'demo_central_titular', body: { motivo: 'Cheguei e o carro estava bloqueado' } },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.body.recall.situacao, 'DUE');
+    assert.ok(Date.parse(response.body.recall.prazoFinal) > clock.now());
+  });
+
+  test('so o custodiante declara disponivel; so o interessado reabre', async () => {
+    const pelaErrada = await api<{ erro: { codigo: string } }>(
+      'POST',
+      `/api/v1/recalls/${recallId}/disponivel`,
+      { key: 'demo_central_titular' },
+    );
+    assert.equal(pelaErrada.status, 403);
+    assert.equal(pelaErrada.body.erro.codigo, 'NOT_CUSTODIAN');
+  });
+});
+
 describe('recall represado por trava ativa', () => {
   let vehicleId: string;
 

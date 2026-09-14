@@ -83,7 +83,39 @@ punir o comportamento correto — e ensinaria as lojas a não travar.
 
 ---
 
-## 6. Responsabilidade civil muda no check-in, não no checkout
+## 6. O escape operacional do recall não compra tempo
+
+**Decisão.** O recall tem uma modalidade (`fulfilment`). No padrão
+`CUSTODIAN_DELIVERS` o prazo mede **entregar** (4h úteis); em
+`REQUESTER_COLLECTS` mede **deixar disponível** (1h útil). E, dentro do prazo, o
+custodiante pode declarar o carro pronto (`READY_FOR_PICKUP`): o relógio para e a
+obrigação dele se encerra.
+
+**Por quê.** O SLA de 4 horas é plausível quando existe motorista. Quando não
+existe — e não existe com frequência — a regra rígida produz o pior dos dois
+mundos: o custodiante fica em atraso por um transporte que nunca teve como fazer,
+ou queima as 4 horas legitimamente protegido pelo prazo enquanto a dona perde a
+venda que motivou o recall. Um prazo que só pode ser cumprido de um jeito não é
+um prazo, é uma aposta na logística alheia.
+
+**Consequência.** Três travas impedem que o escape vire elástico:
+
+- `electToCollect` calcula `dueAt = min(dueAt atual, agora + 1h útil)` — **nunca**
+  estende. Trocar de modalidade não salva quem já está atrasado.
+- `markReadyForPickup` guarda os minutos úteis restantes em
+  `pausedRemainingMinutes` em vez de descartá-los.
+- `reopenDeadline` **retoma** com esses minutos. Declarar disponível cedo demais
+  para parar o relógio não rende nada: quando quem chamou reclama, o prazo volta
+  de onde parou.
+
+**Descartado.** Deixar a loja simplesmente pedir mais prazo. Prazo negociável
+caso a caso vira prazo nenhum — e a governança passaria a arbitrar atraso em vez
+de arbitrar conduta. O escape aqui não afrouxa o relógio: muda **de quem** é a
+obrigação que ele mede.
+
+---
+
+## 7. Responsabilidade civil muda no check-in, não no checkout
 
 **Decisão.** Em trânsito, `custodianStoreId` continua sendo a loja de **origem**.
 
@@ -96,7 +128,7 @@ a atribuição de multa reflete isso.
 
 ---
 
-## 7. Horas úteis de verdade, não `+ 4 * 3600_000`
+## 8. Horas úteis de verdade, não `+ 4 * 3600_000`
 
 **Decisão.** Aritmética completa de horas úteis: fuso via `Intl`, dias e janelas
 configuráveis por dia da semana, feriados nacionais incluindo os móveis
@@ -113,7 +145,7 @@ e a dependência traria muito mais superfície do que resolve.
 
 ---
 
-## 8. Dinheiro em centavos inteiros
+## 9. Dinheiro em centavos inteiros
 
 **Decisão.** `Money = { currency: 'BRL', cents: number }`, sempre inteiro.
 
@@ -124,7 +156,7 @@ integrador varia entre eles.
 
 ---
 
-## 9. Domínio funcional puro, sem classes de agregado
+## 10. Domínio funcional puro, sem classes de agregado
 
 **Decisão.** Dados imutáveis + funções puras
 `(estado, comando) → Result<{estado', eventos}, erro>`.
@@ -141,7 +173,7 @@ mutam o mesmo objeto e a segunda falha.
 
 ---
 
-## 10. `Result` para falhas de negócio, `throw` só para bugs
+## 11. `Result` para falhas de negócio, `throw` só para bugs
 
 **Decisão.** Tudo que um usuário da rede pode causar retorna `err(...)`.
 `throw` é reservado a invariantes quebradas (`InvariantViolationError`).
@@ -153,7 +185,7 @@ vira 4xx com código estável; `InvariantViolationError` vira 500 e alerta.
 
 ---
 
-## 11. Expiração preguiçosa **e** ativa
+## 12. Expiração preguiçosa **e** ativa
 
 **Decisão.** A trava é materializada em toda leitura do veículo e também por um
 varredor periódico, ambos pela mesma função idempotente.
@@ -167,7 +199,7 @@ falhar, atrasar ou nem rodar sem produzir estado inválido.
 
 ---
 
-## 12. Rede fechada: o anonimato muda de lugar
+## 13. Rede fechada: o anonimato muda de lugar
 
 **Decisão.** Não existe superfície para o consumidor. Nenhuma rota pública de
 negócio, nenhum link enviado ao cliente, nenhuma página hospedada. O consumidor
@@ -190,7 +222,7 @@ que deixou de existir. Removê-la eliminou um agregado inteiro.
 
 ---
 
-## 21. Fotos neutras são uma coleção separada, não um filtro
+## 14. Fotos neutras são uma coleção separada, não um filtro
 
 **Decisão.** O veículo tem duas coleções: as fotos do feed (uso interno) e um
 conjunto **neutro** publicado pela loja dona, que é o único que entra no
@@ -219,7 +251,7 @@ porque fala do carro, não de quem o possui.
 
 ---
 
-## 22. A dona não vê a margem da parceira
+## 15. A dona não vê a margem da parceira
 
 **Decisão.** Os números da loja vendedora — preço ao consumidor, valor dado na
 troca, margem, resultado — vivem num bloco `sellerPrivate` que a loja
@@ -242,7 +274,7 @@ alimentam notificação e auditoria, e a dona lê as duas.
 
 ---
 
-## 19. Preço ao consumidor é opcional
+## 16. Preço ao consumidor é opcional
 
 **Decisão.** `retailPriceToConsumer` pode ser `null`.
 
@@ -258,7 +290,7 @@ idêntico.
 
 ---
 
-## 20. Sanitização por lista de inclusão
+## 17. Sanitização por lista de inclusão
 
 **Decisão.** `buildMaterialKit` monta o objeto campo a campo. Nunca
 `{...vehicle}` com remoções.
@@ -274,7 +306,7 @@ atualizar a função.
 
 ---
 
-## 21. O feed não decide sozinho
+## 18. O feed não decide sozinho
 
 **Decisão.** A sincronização nunca move custódia física, nunca derruba
 negociação em andamento, e não retira da rede um carro que sumiu do feed mas
@@ -291,7 +323,7 @@ pelo número que travou.
 
 ---
 
-## 22. Chassi como chave de deduplicação da rede
+## 19. Chassi como chave de deduplicação da rede
 
 **Decisão.** Chassi já anunciado por outra loja é recusado, tanto no cadastro
 manual quanto na ingestão.
@@ -302,7 +334,7 @@ isso a sincronização casa por id externo **ou** por chassi, nessa ordem.
 
 ---
 
-## 19. Zero dependências de runtime
+## 20. Zero dependências de runtime
 
 **Decisão.** Só Node built-ins. Parser XML, gerador de PDF, roteador HTTP e
 autenticação escritos à mão.
@@ -321,7 +353,7 @@ material fotográfico que acompanha o kit, e as fotos vão como arquivos. A saí
 
 ---
 
-## 20. Português nos limites, inglês na estrutura
+## 21. Português nos limites, inglês na estrutura
 
 **Decisão.** Identificadores de código em inglês; termos intraduzíveis do
 domínio (ATPV-e, laudo cautelar, placa, chassi) em português; mensagens de erro,
@@ -333,7 +365,7 @@ negócio — que é onde a ambiguidade custa caro — fica ancorado no
 
 ---
 
-## 21. Concorrência: o que muda quando sair da memória
+## 22. Concorrência: o que muda quando sair da memória
 
 O adaptador atual é em memória e o processo é single-threaded, então **duas
 tentativas de travar o mesmo carro nunca se cruzam**. Isso é uma propriedade do
@@ -360,7 +392,7 @@ novo sem persistir, então envolver "carregar → decidir → salvar" numa trans
 
 ---
 
-## 22. O que ficou de fora, e por quê
+## 23. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

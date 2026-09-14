@@ -11,7 +11,7 @@
 
 import { buildApplication } from '../src/bootstrap.ts';
 import { loadConfig } from '../src/config.ts';
-import { FakeClock, DAY, HOUR, toIso } from '../src/domain/shared/clock.ts';
+import { FakeClock, DAY, HOUR, MINUTE, toIso } from '../src/domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../src/domain/shared/ids.ts';
 import { type Money, format as brl, fromReais } from '../src/domain/shared/money.ts';
 
@@ -32,6 +32,7 @@ import {
   custodianAt,
   custodyHistory,
   deliverVehicleToConsumer,
+  markRecallReadyForPickup,
   requestVehicleRecall,
   startCustodyTransfer,
 } from '../src/application/custody-service.ts';
@@ -458,6 +459,76 @@ const entrega = unwrap(
 diz(`Veiculo entregue ao comprador. Situacao fisica: ${entrega.vehicle.physical.state}`);
 destaque(
   `A entrega fisica e a entrega da negociacao sao o mesmo fato: ${entrega.deal?.status}.`,
+);
+
+// ---------------------------------------------------------------------------
+ato('Outro carro, outro caso: o escape operacional do recall');
+
+// O Renegade tambem e da Loja A e esta no patio dela. Vai para a Loja B.
+const renegadeId = sync.changes.find((change) => change.vehicle.plate === 'HJK5F19')
+  ?.vehicle.id as VehicleId;
+
+const idaRenegade = unwrap(
+  await startCustodyTransfer(context, lojaA, {
+    vehicleId: renegadeId,
+    toStoreId: lojaB.store.id,
+    purpose: TransferPurpose.EXTENDED_STOCK,
+    checkout: termo(context, lojaA, 29_450, 5),
+  }),
+);
+avanca(2 * HOUR, 'o Renegade chega ao patio da Loja B');
+unwrap(
+  await completeCustodyTransfer(context, lojaB, idaRenegade.transfer.id, termo(context, lojaB, 29_480, 5)),
+);
+
+const recallRenegade = unwrap(
+  await requestVehicleRecall(context, lojaA, {
+    vehicleId: renegadeId,
+    reason: RecallReason.OWN_SALE,
+    note: 'Cliente meu fechou agora.',
+  }),
+);
+diz(`A ${lojaA.store.profile.tradeName} chama o Renegade de volta.`);
+diz(`  Quem leva: ${recallRenegade.fulfilment} | prazo: ${toIso(recallRenegade.dueAt as number)}`);
+
+avanca(30 * MINUTE, 'a Loja B procura motorista e nao acha');
+
+const disponivel = unwrap(
+  await markRecallReadyForPickup(
+    context,
+    lojaB,
+    recallRenegade.id,
+    'Sem motorista hoje. Carro na frente, chave na recepcao.',
+  ),
+);
+destaque(
+  `A Loja B nao tem como levar — e em vez de queimar as 4 horas coberta pelo prazo, ` +
+    `declara o carro disponivel. A obrigacao dela termina aqui.`,
+);
+diz(`  Situacao: ${disponivel.status} | restavam ${disponivel.pausedRemainingMinutes} min uteis`);
+
+avanca(28 * HOUR, 'passa mais de um dia');
+const varredura2 = await runSweep(context);
+diz(`Varredor: ${varredura2.breachedRecalls} recall(s) descumprido(s) — o relogio esta parado.`);
+
+const buscaRenegade = unwrap(
+  await startCustodyTransfer(context, lojaB, {
+    vehicleId: renegadeId,
+    toStoreId: lojaA.store.id,
+    purpose: TransferPurpose.RECALL_RETURN,
+    checkout: termo(context, lojaB, 29_480, 5),
+  }),
+);
+const retornoRenegade = unwrap(
+  await completeCustodyTransfer(context, lojaA, buscaRenegade.transfer.id, termo(context, lojaA, 29_495, 5)),
+);
+diz(`A Loja A foi buscar. Recall: ${retornoRenegade.recall?.status}`);
+destaque(
+  'Sem o escape, a Loja B estaria em atraso por um transporte que ela nunca teve como fazer.',
+);
+diz(
+  'A mesma porta abre do outro lado: quem chama pode dizer "eu retiro" ja no pedido — ' +
+    'ai o prazo nao e de entrega, e de 1 hora util para deixar o carro disponivel.',
 );
 
 // ---------------------------------------------------------------------------

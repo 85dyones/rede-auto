@@ -4,7 +4,7 @@
 
 import { asCustodyTransferId, asRecallId, asStoreId, asVehicleId } from '../../domain/shared/ids.ts';
 import { TransferPurpose, sealTerm } from '../../domain/custody/custody.ts';
-import { RecallReason } from '../../domain/recall/recall.ts';
+import { RecallFulfilment, RecallReason } from '../../domain/recall/recall.ts';
 import type { AppContext } from '../../application/context.ts';
 import {
   abortCustodyTransfer,
@@ -12,7 +12,10 @@ import {
   custodianAt,
   custodyHistory,
   deliverVehicleToConsumer,
+  electRecallCollection,
+  markRecallReadyForPickup,
   recallBoard,
+  reopenRecallDeadline,
   requestVehicleRecall,
   startCustodyTransfer,
   withdrawRecall,
@@ -181,6 +184,9 @@ export function registerCustodyRoutes(router: Router, context: AppContext): void
       vehicleId: asVehicleId(request.params['id'] as string),
       reason: reason.value,
       note: optionalText(body, 'observacao'),
+      // "euRetiro": a parte interessada ja avisa que vai buscar o carro.
+      fulfilment:
+        body['euRetiro'] === true ? RecallFulfilment.REQUESTER_COLLECTS : undefined,
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
@@ -195,6 +201,60 @@ export function registerCustodyRoutes(router: Router, context: AppContext): void
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     const result = await withdrawRecall(context, actor.value, asRecallId(request.params['id'] as string));
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(200, { recall: recallDto(result.value) });
+  });
+
+  /**
+   * A parte interessada opta por ir buscar o carro — o escape para quando o
+   * custodiante nao tem como levar e esta coberto pelo prazo.
+   */
+  router.post('/api/v1/recalls/:id/retirada', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const result = await electRecallCollection(
+      context,
+      actor.value,
+      asRecallId(request.params['id'] as string),
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(200, { recall: recallDto(result.value) });
+  });
+
+  /** O custodiante declara o veiculo disponivel. A obrigacao dele acaba aqui. */
+  router.post('/api/v1/recalls/:id/disponivel', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = typeof request.body === 'object' && request.body !== null ? (request.body as Record<string, unknown>) : {};
+    const result = await markRecallReadyForPickup(
+      context,
+      actor.value,
+      asRecallId(request.params['id'] as string),
+      optionalText(body, 'observacao'),
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(200, { recall: recallDto(result.value) });
+  });
+
+  /** Foi buscar e o carro nao estava la: o prazo retoma de onde parou. */
+  router.post('/api/v1/recalls/:id/reabrir-prazo', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const reason = text(body.value, 'motivo', { min: 3, max: 500 });
+    if (!reason.ok) return errorResponse(reason.error, request.requestId);
+
+    const result = await reopenRecallDeadline(
+      context,
+      actor.value,
+      asRecallId(request.params['id'] as string),
+      reason.value,
+    );
     if (!result.ok) return errorResponse(result.error, request.requestId);
     return json(200, { recall: recallDto(result.value) });
   });
