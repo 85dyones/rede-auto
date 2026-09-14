@@ -295,6 +295,7 @@ sai em `GET /api/v1`.
 | [`docs/api.md`](docs/api.md) | referência da API, com exemplos de requisição |
 | [`docs/decisoes.md`](docs/decisoes.md) | decisões de projeto e o que foi descartado |
 | [`docs/glossario.md`](docs/glossario.md) | vocabulário do negócio ↔ identificadores no código |
+| [`docs/handoff-frontend.md`](docs/handoff-frontend.md) | briefing para a proposta de frontend, ancorado no contrato real da API |
 
 ## Estado do projeto
 
