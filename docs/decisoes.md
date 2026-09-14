@@ -167,33 +167,114 @@ falhar, atrasar ou nem rodar sem produzir estado inválido.
 
 ---
 
-## 12. Sanitização white-label por lista de inclusão
+## 12. Rede fechada: o anonimato muda de lugar
 
-**Decisão.** `buildWhiteLabelSheet` monta o objeto campo a campo. Nunca
-`{...vehicle}` com remoções.
+**Decisão.** Não existe superfície para o consumidor. Nenhuma rota pública de
+negócio, nenhum link enviado ao cliente, nenhuma página hospedada. O consumidor
+é atendido no canal da própria loja parceira.
 
-**Por quê.** Com spread, todo campo novo do agregado passa a vazar **por
-padrão**, e o vazamento só aparece em produção. Com lista de inclusão, o padrão é
-não vazar e o esforço fica do lado certo.
+**Por quê.** A plataforma existe para viabilizar o negócio **entre as lojas** —
+o que hoje acontece por WhatsApp, é moroso e mata a venda. Hospedar anúncio a
+colocaria no meio da relação da parceira com o cliente dela, que não é o
+problema que ela resolve.
 
-Reforçado por `findLeaks`, um guarda de runtime que varre a lâmina serializada
-antes de responder. Ele duplica o que os testes cobrem — de propósito: um campo
-adicionado meses depois não vaza silenciosamente porque ninguém lembrou de
-atualizar a função.
+**Consequência que reorganiza o desenho.** Num marketplace, o anonimato protege
+a página pública. Aqui, **dentro** da rede não há segredo entre parceiras: elas
+se conhecem, e precisam ver de quem é o carro, qual o líquido e o que diz o
+laudo para decidir. O que precisa ser neutro é o material que **sai** daqui,
+porque ele vai ser republicado por outra loja no canal dela.
 
-### As fotos são o vazamento mais fácil de esquecer
-
-`cdn.primemotors.com.br/onix-1.jpg` entrega a loja proprietária sem que ninguém
-perceba. As URLs originais nunca saem na lâmina; as fotos passam por
-`/s/:token/fotos/:i`. Sem proxy configurado, a lâmina sai **sem foto** — melhor
-que vazar.
-
-Hoje a rota redireciona. Para esconder o domínio também do tráfego, é preciso
-servir os bytes com cache; o contrato da rota não muda.
+**Descartado.** O link temporário `/s/:token` com TTL, contagem de aberturas e
+revogação — toda essa mecânica existia para controlar uma página de consumidor
+que deixou de existir. Removê-la eliminou um agregado inteiro.
 
 ---
 
-## 13. O feed não decide sozinho
+## 21. Fotos neutras são uma coleção separada, não um filtro
+
+**Decisão.** O veículo tem duas coleções: as fotos do feed (uso interno) e um
+conjunto **neutro** publicado pela loja dona, que é o único que entra no
+material.
+
+**Por quê.** As fotos do feed foram tiradas para o anúncio da própria dona.
+Quase sempre têm adesivo no vidro, a fachada refletida no para-brisa, a placa
+legível, o banner da loja ao fundo. Usá-las como material da rede entregaria a
+origem no primeiro anúncio que a parceira publicasse.
+
+O vazamento mais fácil de esquecer não é nem a foto: é a **URL** dela.
+`cdn.primemotors.com.br/onix-1.jpg` entrega a loja sem que ninguém perceba. Por
+isso o material referencia só caminhos da plataforma, e sem base de mídia
+configurada o kit sai **sem foto** — melhor incompleto do que vazando.
+
+**Assumido.** A curadoria é humana. Decidir se um adesivo entrega a origem é
+julgamento, não regra que software aplique sozinho; o sistema garante que o
+conjunto exista e cubra frente, traseira e interior. Borrar placa e remover
+marca automaticamente é visão computacional, fora de escopo — e declarado como
+tal.
+
+**O CRLV fica de fora** pelo mesmo raciocínio: ele está no nome da loja dona.
+Entre parceiras logadas isso não é segredo, mas o material é feito para sair, e
+o CRLV entregaria a origem justamente onde não pode. O laudo cautelar circula
+porque fala do carro, não de quem o possui.
+
+---
+
+## 22. A dona não vê a margem da parceira
+
+**Decisão.** Os números da loja vendedora — preço ao consumidor, valor dado na
+troca, margem, resultado — vivem num bloco `sellerPrivate` que a loja
+proprietária **não recebe**. Para terceiros a negociação sequer existe (404).
+
+**Por quê.** Era um defeito real: `GET /negociacoes/:id` deixava qualquer loja
+autenticada ler qualquer negociação. Numa rede em que concorrentes dividem
+estoque, isso destrói o modelo — bastaria a dona olhar uma venda para saber
+quanto subir o líquido na próxima, e o incentivo para a parceira trazer clientes
+acabaria junto. "A Loja B retém 100% da margem excedente" só vale se a margem
+for dela também no sentido de ninguém mais poder medi-la.
+
+**Como ficou estrutural, e não só uma regra.** `dealDto` passou a exigir o id de
+quem está olhando. O compilador recusa qualquer serialização que não declare o
+espectador, então esquecer o corte deixou de ser possível sem quebrar o build.
+
+Pelo mesmo motivo o evento `deal.selling_below_net_price` não carrega o preço
+praticado, e `deal.confirmed` não carrega o resultado da vendedora: eventos
+alimentam notificação e auditoria, e a dona lê as duas.
+
+---
+
+## 19. Preço ao consumidor é opcional
+
+**Decisão.** `retailPriceToConsumer` pode ser `null`.
+
+**Por quê.** Quem define valor na plataforma é a dona — o líquido é o número do
+negócio entre as duas lojas. O preço ao consumidor é da parceira, praticado no
+canal dela, fora daqui. Exigi-lo transformaria a plataforma em registro de uma
+venda que ela não intermedeia.
+
+Quando a parceira registra, é para os próprios números, e eles ficam no bloco
+privado. Sem ele, tudo degrada em silêncio: a margem vem `null`, a validação de
+valor da troca contra o preço de venda é pulada, e o acordo entre as lojas segue
+idêntico.
+
+---
+
+## 20. Sanitização por lista de inclusão
+
+**Decisão.** `buildMaterialKit` monta o objeto campo a campo. Nunca
+`{...vehicle}` com remoções.
+
+**Por quê.** Com spread, todo campo novo do agregado passa a vazar **por
+padrão**, e o vazamento só aparece em produção — no anúncio da parceira, que é o
+pior lugar possível. Com lista de inclusão, o padrão é não vazar.
+
+Reforçado por `findLeaks`, um guarda de runtime que varre o kit serializado
+antes de o download sair. Ele duplica o que os testes cobrem, de propósito: um
+campo adicionado meses depois não vaza silenciosamente porque ninguém lembrou de
+atualizar a função.
+
+---
+
+## 21. O feed não decide sozinho
 
 **Decisão.** A sincronização nunca move custódia física, nunca derruba
 negociação em andamento, e não retira da rede um carro que sumiu do feed mas
@@ -210,7 +291,7 @@ pelo número que travou.
 
 ---
 
-## 14. Chassi como chave de deduplicação da rede
+## 22. Chassi como chave de deduplicação da rede
 
 **Decisão.** Chassi já anunciado por outra loja é recusado, tanto no cadastro
 manual quanto na ingestão.
@@ -221,26 +302,26 @@ isso a sincronização casa por id externo **ou** por chassi, nessa ordem.
 
 ---
 
-## 15. Zero dependências de runtime
+## 19. Zero dependências de runtime
 
 **Decisão.** Só Node built-ins. Parser XML, gerador de PDF, roteador HTTP e
 autenticação escritos à mão.
 
 **Por quê.** Cada peça é pequena e o escopo é conhecido: o parser XML precisa
 **recusar** o que é perigoso mais do que cobrir a especificação inteira; o
-roteador são ~100 linhas; a lâmina em PDF é texto, linhas e retângulos numa A4.
+roteador são ~100 linhas; a ficha em PDF é texto, linhas e retângulos numa A4.
 
 Numa aplicação que move dinheiro de terceiros e ingere XML de fornecedores, a
 superfície de uma dependência no caminho crítico custa mais do que resolve
-**neste tamanho**. A conta mudaria se a lâmina precisasse de imagens embutidas
+**neste tamanho**. A conta mudaria se a ficha precisasse de imagens embutidas
 ou o parser tivesse que lidar com namespaces de verdade.
 
-**Custo assumido.** O gerador de PDF não embute imagens — as fotos vão na versão
-HTML, que é a que o cliente abre no celular. A saída foi validada com pdf.js.
+**Custo assumido.** O gerador de PDF não embute imagens — a ficha lista o
+material fotográfico que acompanha o kit, e as fotos vão como arquivos. A saída foi validada com pdf.js.
 
 ---
 
-## 16. Português nos limites, inglês na estrutura
+## 20. Português nos limites, inglês na estrutura
 
 **Decisão.** Identificadores de código em inglês; termos intraduzíveis do
 domínio (ATPV-e, laudo cautelar, placa, chassi) em português; mensagens de erro,
@@ -252,7 +333,7 @@ negócio — que é onde a ambiguidade custa caro — fica ancorado no
 
 ---
 
-## 17. Concorrência: o que muda quando sair da memória
+## 21. Concorrência: o que muda quando sair da memória
 
 O adaptador atual é em memória e o processo é single-threaded, então **duas
 tentativas de travar o mesmo carro nunca se cruzam**. Isso é uma propriedade do
@@ -279,7 +360,7 @@ novo sem persistir, então envolver "carregar → decidir → salvar" numa trans
 
 ---
 
-## 18. O que ficou de fora, e por quê
+## 22. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

@@ -1,7 +1,7 @@
 # Handoff de frontend — rede-auto
 
 **Para:** Claude Design · **De:** time de backend · **Status:** API implementada e
-testada (337 testes), frontend inexistente.
+testada (324 testes), frontend inexistente.
 
 Este documento é o briefing para a proposta visual. Tudo aqui está ancorado no
 contrato real da API — os JSON citados são respostas de verdade, capturadas do
@@ -16,10 +16,15 @@ completo), [`glossario.md`](glossario.md) (vocabulário).
 
 ## 1. O produto, em um minuto
 
-Rede fechada de **6 lojas fundadoras** de seminovos que compartilham estoque
+Rede **fechada** de 6 lojas fundadoras de seminovos que compartilham estoque
 entre si. Quando a Loja B tem um cliente para um carro que está na Loja A, hoje
-isso se resolve por telefone: negocia margem, confirma disponibilidade, combina
-o frete. A plataforma substitui essa ligação.
+isso se resolve no WhatsApp: negocia margem, confirma disponibilidade, combina o
+frete. É moroso, e a lentidão mata a venda. A plataforma substitui essa conversa.
+
+**Fechada no sentido literal: não existe interface para o cliente final.** Só
+lojista credenciado e logado entra. O consumidor é atendido no canal da própria
+loja parceira — site dela, WhatsApp dela, vitrine dela. A plataforma nunca
+aparece na venda, e não há nenhuma tela voltada a quem compra o carro.
 
 O modelo comercial é deliberadamente simples:
 
@@ -42,7 +47,7 @@ uma, o produto foi mal entendido — é exatamente o atrito que ele elimina.
 | **Titular** | `PRINCIPAL` | mesa ou celular, decide preço e governança | baixa — dias |
 
 O vendedor é quem manda no design. Ele abre a trava com o cliente olhando,
-manda a lâmina pelo WhatsApp antes do cliente esfriar, e faz a vistoria do carro
+manda a ficha pelo WhatsApp dele antes do cliente esfriar, e faz a vistoria do carro
 em pé no pátio, sol na tela, às vezes com uma mão só.
 
 Um usuário pertence a **uma** loja. A mesma pessoa nunca vê a rede de dois
@@ -85,7 +90,7 @@ olha — ver `vocePode` e `prioridade` na seção 5.
 
 ---
 
-## 4. Os sete problemas difíceis
+## 4. Os oito problemas difíceis
 
 ### P1 · O cartão de veículo tem que contar duas histórias
 
@@ -160,23 +165,32 @@ telefone — e o produto falhou. A API entrega o texto pronto:
 
 **Mostre essa frase.** É o que impede a ligação.
 
-### P5 · Dois números que nunca podem se confundir
+### P5 · Dentro da rede é tudo aberto; o que **sai** é que precisa ser neutro
 
-O vendedor tem na mesma tela o **preço líquido** (R$ 85.000 — o que a Loja A
-recebe, segredo comercial) e o **preço ao cliente** (R$ 96.900 — o que ele
-pratica). Se ele virar o celular para o cliente na tela errada, o modelo da rede
-quebra.
+Esta é a inversão que mais confunde quem vem de marketplace. Entre parceiras
+logadas **não há segredo**: elas se conhecem, e precisam ver de quem é o carro,
+qual o líquido e o que diz o laudo para decidir se assumem o cliente. Esconder
+isso dentro da plataforma só atrapalharia.
 
-O design precisa de uma separação **brutal e persistente** entre:
+O anonimato mora no **material que a parceira baixa e republica no canal dela**.
+Ali, qualquer marca da loja dona apareceria no anúncio de outra loja.
 
-- **visão interna** (B2B): mostra líquido, margem, quem é a loja dona;
-- **modo cliente** (a lâmina): não mostra nada disso.
+Fica de fora do material, e o design precisa deixar isso legível para quem
+publica as fotos:
 
-Não pode ser um toggle discreto. Sugestão: chrome visualmente distinto — a
-lâmina como um contexto separado, não uma variação da mesma tela.
+| Fora do material | Motivo |
+|---|---|
+| Nome, CNPJ e contato da loja dona | apareceriam no anúncio da parceira |
+| Preço líquido de repasse | é o acordo entre as duas lojas |
+| Placa completa e chassi | consulta pública devolve o proprietário |
+| **CRLV** | está no nome da loja dona |
+| **As fotos do feed** | tiradas para o anúncio da própria dona: adesivo, fachada, placa |
 
-Existe um terceiro número tóxico: `liquidoRepresado`. Quando a dona reprecifica
-durante uma trava, o novo valor fica represado e **só vale depois**:
+A última é a mais fácil de esquecer, e não é nem a foto — é a **URL** dela:
+`cdn.primemotors.com.br/onix-1.jpg` entrega a origem sem que ninguém perceba.
+
+Existe ainda um número tóxico dentro da plataforma. Quando a dona reprecifica
+durante uma trava, o novo líquido fica represado e **só vale depois**:
 
 ```jsonc
 "precos": {
@@ -188,7 +202,35 @@ durante uma trava, o novo valor fica represado e **só vale depois**:
 Quem está negociando fecha por 85.000. Mostrar 89.000 com igual peso seria
 mentir para quem está com o cliente na frente.
 
-### P6 · Prazo em horas ÚTEIS
+### P6 · A dona não pode ver a margem da parceira
+
+A API entrega o bloco `financeiro` **filtrado por quem está olhando**. Os
+números da vendedora vêm num `meusNumeros` que a loja proprietária não recebe:
+
+```jsonc
+// as duas lojas veem
+"liquidoDaLojaProprietaria":   { "formatado": "R$ 89.000,00" },
+"dinheiroDevidoAProprietaria": { "formatado": "R$ 48.000,00" },
+"saldoAberto":                 { "formatado": "R$ 48.000,00" },
+
+// só a vendedora
+"meusNumeros": {
+  "precoAoConsumidor": { "formatado": "R$ 96.900,00" },
+  "minhaMargem":       { "formatado": "R$  7.900,00" },
+  "resultadoTotal":    { "formatado": "R$  6.900,00" }
+}
+```
+
+Numa rede em que concorrentes dividem estoque, a dona ver a margem da parceira
+destrói o modelo: bastaria olhar uma venda para saber quanto subir o líquido na
+próxima. Para terceiros a negociação sequer existe — `404`.
+
+**Para o design isso significa duas telas de negociação, não uma com campos
+escondidos.** A da vendedora é operacional e mostra o resultado dela. A da dona
+é de acompanhamento financeiro: o que vou receber, quanto já entrou, o que
+falta. Tratar como a mesma tela com condicionais convida ao vazamento.
+
+### P7 · Prazo em horas ÚTEIS
 
 O SLA de recall é "4 horas **úteis**" no fuso de São Paulo, seg–sex 08–18h,
 sábado 09–13h, feriados nacionais incluídos. Um pedido às 17h de sexta vence
@@ -198,12 +240,17 @@ Nunca mostre só "faltam 4h". Mostre o **prazo absoluto legível** ("segunda,
 11:00") e, ao lado, o tempo útil restante. Um contador regressivo cru atravessa
 a madrugada e o fim de semana mentindo.
 
-### P7 · A vistoria é feita em pé, no pátio
+### P8 · A vistoria é feita em pé, no pátio
 
 O termo de custódia exige **cinco fotos obrigatórias** (frente, traseira,
-esquerda, direita, odômetro), odômetro, nível de combustível **em oitavos**
-(0–8, como o ponteiro do painel — não porcentagem, não litros), avarias e
-assinatura com CPF.
+esquerda, direita, odômetro), odômetro, nível de combustível **em oitavos** —
+como o ponteiro do painel, não porcentagem e não litros — avarias e assinatura
+com CPF.
+
+> Cuidado para não confundir com as fotos do **material** (P5): lá a lista
+> obrigatória é frente, traseira e interior. São propósitos diferentes — a
+> vistoria prova avaria, o material vende o carro — e misturá-las produziria um
+> fluxo que não serve bem a nenhum dos dois.
 
 É o fluxo mais fisicamente constrangido do produto: uma mão, sol na tela, luvas.
 E é o momento em que a **responsabilidade civil muda de loja** — a entrada
@@ -270,7 +317,7 @@ imediata, sem frete e sem espera.
 
 #### 5.5 Termo de vistoria (mobile-first, obrigatório)
 
-*Quem:* gerente/conferente. Ver P7.
+*Quem:* gerente ou conferente. Ver P8.
 
 Dois momentos com a mesma estrutura e pesos diferentes:
 **saída** (assina quem está com o carro) e **entrada** (assina o destino — e a
@@ -285,42 +332,53 @@ O termo é selado com SHA-256 e o CPF sai mascarado na leitura
 (`"***.982.***-**"`). A tela de leitura de um termo deve transmitir que aquilo é
 um documento assinado, não um formulário preenchido.
 
-#### 5.6 Lâmina white-label (cliente final)
+#### 5.6 Material de divulgação
 
-*Quem:* o consumidor, pelo WhatsApp. **Pública, sem login.**
+*Quem:* a parceira que vai anunciar. **Nunca o consumidor — ele não acessa a
+plataforma.**
 
-`GET /s/:token` · `/lamina.html` · `/lamina.pdf`. Já existe uma versão HTML
-funcional em `src/infra/render/lamina.ts` — o design deve **propor a versão
-definitiva**, e ela é a peça de maior visibilidade do produto.
+`GET /api/v1/veiculos/:id/material` · `/ficha.pdf` · `/fotos/:i` · `/laudo.pdf`.
+Todas autenticadas.
 
-Resposta real (note o que **não** está lá):
+O que a parceira baixa para usar no canal dela:
 
 ```jsonc
 {
-  "referencia": "V2L8LNOZ",
-  "titulo": "Chevrolet Onix 1.0 Turbo LTZ 2023",
-  "ano": "2022/2023", "quilometragem": "38.437 km", "cor": "Prata",
-  "combustivel": "Flex", "cambio": "Automatico", "portas": 4,
-  "opcionais": ["Ar-condicionado", "Direcao eletrica", "Multimidia", "Camera de re"],
-  "fotos": ["https://rede.exemplo.com.br/s/<token>/fotos/0", "…/1"],
-  "preco": { "formatado": "R$ 96.900,00" },
-  "laudoCautelar": { "aprovado": true, "situacao": "Laudo cautelar aprovado",
-                     "empresa": "Cautelar Brasil" },
-  "placa": null,
-  "apresentadoPor": { "nomeFantasia": "Veloz Seminovos", "cidade": "Sao Paulo",
-                      "uf": "SP", "telefone": "(19) 3201-4455" },
-  "validoAte": "2026-09-16T18:00:00.000Z",
-  "aviso": "Valores e disponibilidade sujeitos a confirmacao…"
+  "referencia": "EH_DEMO1",
+  "prontidao": { "fotos": 4, "angulosFaltando": [], "temLaudoAnexado": true, "pronto": true },
+  "ficha": {
+    "titulo": "Chevrolet Onix 1.0 Turbo LTZ 2023",
+    "ano": "2022/2023", "quilometragem": "38.400 km", "cor": "Prata",
+    "combustivel": "Flex", "cambio": "Automatico", "portas": 4,
+    "opcionais": ["Ar-condicionado", "Direcao eletrica", "Multimidia"]
+  },
+  "fotos": [{ "url": "/api/v1/veiculos/veh_demo_1/material/fotos/0", "angulo": "Frente" }],
+  "laudoCautelar": { "aprovado": true, "empresa": "Cautelar Brasil",
+                     "arquivoUrl": "/api/v1/veiculos/veh_demo_1/material/laudo.pdf" },
+  "minhaMarca": null
 }
 ```
 
-Ausentes **por construção**: nome/CNPJ da loja dona, preço líquido, chassi,
-placa completa, número do laudo, e o domínio original das fotos. A única marca
-na página é a de quem compartilhou.
+**O kit nasce neutro** — sem loja e sem preço. A parceira pode pedir a versão
+com a marca **dela** e o preço **dela** (`?comMinhaLoja=true&preco=96900`);
+nunca os da dona. Ver P5 para o que fica de fora e por quê.
 
-Requisitos: abre no celular em rede ruim; imprime bem (o cliente leva ao banco);
-tema claro e escuro; `noindex`. O PDF é gerado sem imagens — proponha um layout
-que funcione só com tipografia e estrutura.
+Duas telas, não uma:
+
+**Baixar material** (qualquer parceira) — o que existe, o que dá para usar hoje,
+e o botão que gera a ficha. `prontidao.angulosFaltando` é o que decide se ela
+consegue anunciar ou não: um carro sem material é um carro que ela não vende,
+por melhor que seja o preço.
+
+**Publicar material** (só a loja dona) — subir o conjunto neutro exigindo
+frente, traseira e interior. É uma tela de curadoria: a pessoa precisa entender
+que está decidindo o que **outra loja** vai publicar como se fosse dela. Um
+adesivo no vidro ou a fachada refletida no para-brisa estragam o material, e
+nenhum software vai avisar — esse julgamento é dela.
+
+A ficha em PDF é o que circula por WhatsApp, imprime na vitrine e vai junto na
+proposta ao banco. O gerador não embute imagens: proponha um layout que funcione
+com tipografia e estrutura, listando o material fotográfico que acompanha.
 
 ---
 
@@ -329,58 +387,59 @@ que funcione só com tipografia e estrutura.
 #### 5.7 Recalls (os dois lados)
 
 `GET /api/v1/recalls` devolve `devoDevolver` e `estouEsperando`. São dois estados
-emocionais opostos na mesma tela — a obrigação e a espera. Ver P4 e P6.
+emocionais opostos na mesma tela — a obrigação e a espera. Ver P4 e P7.
 
 Situações: `WAITING_LOCK_RELEASE` (sem prazo ainda) · `DUE` (correndo) ·
 `FULFILLED` · `CANCELLED` (com `motivoCancelamento` — `SUPERSEDED_BY_SALE`
 significa "o carro foi vendido, virou dinheiro em vez de voltar"). O campo
 `descumpridoEm` marca SLA estourado.
 
-#### 5.8 Negociação (a tela do dinheiro)
+#### 5.8 Negociação — e são **duas** telas
 
-*Quem:* vendedor monta, gerente acompanha. Doze números; precisa de hierarquia.
+Ver P6. A vendedora e a dona recebem blocos diferentes da mesma negociação, e
+tratar como uma tela com campos escondidos convida ao vazamento.
+
+**Tela da vendedora** — operacional. Ela monta a negociação, registra o preço
+que pratica (opcional) e acompanha o próprio resultado:
 
 ```jsonc
-"financeiro": {
-  "precoAoConsumidor":              { "formatado": "R$ 96.900,00" },
-  "valorDadoNaTroca":               { "formatado": "R$ 42.000,00" },
-  "dinheiroDoConsumidor":           { "formatado": "R$ 54.900,00" },
-  "liquidoDaLojaProprietaria":      { "formatado": "R$ 85.000,00" },
-  "creditoDaTrocaParaProprietaria": { "formatado": "R$ 0,00" },
-  "dinheiroDevidoAProprietaria":    { "formatado": "R$ 85.000,00" },
-  "margemDaVendedora":              { "formatado": "R$ 11.900,00" },
-  "resultadoDaVendedoraNaTroca":    { "formatado": "-R$ 42.000,00" },
-  "resultadoTotalDaVendedora":      { "formatado": "-R$ 30.100,00" },
-  "saldoAberto":                    { "formatado": "R$ 85.000,00" },
-  "liquidado": false, "vendaAbaixoDoLiquido": false
+"meusNumeros": {
+  "precoAoConsumidor":    { "formatado": "R$ 96.900,00" },
+  "valorDadoNaTroca":     { "formatado": "R$ 42.000,00" },
+  "dinheiroDoConsumidor": { "formatado": "R$ 54.900,00" },
+  "minhaMargem":          { "formatado": "R$  7.900,00" },
+  "resultadoNaTroca":     { "formatado": "-R$ 1.000,00" },
+  "resultadoTotal":       { "formatado": "R$  6.900,00" }
 }
 ```
 
-Três blocos, nesta ordem de leitura: **o cliente paga** → **a Loja A recebe** →
-**eu fico com**.
+**Tela da dona** — acompanhamento financeiro. O que vou receber, quanto já
+entrou, o que falta:
 
-> ⚠️ **Armadilha real, ver na resposta acima.** Este exemplo está em
-> `situacao: "AWAITING_TRADE_IN_ACCEPTANCE"` — transbordo proposto, ainda sem
-> aceite da Loja A. Enquanto não há aceite, o crédito da troca é R$ 0,00, e por
-> isso `resultadoTotalDaVendedora` aparece como **−R$ 30.100,00**. Esse número
-> **não é o resultado da operação** — é o resultado *se a Loja A recusar tudo*.
-> Exibi-lo como final faria um gerente rejeitar um bom negócio.
->
-> Enquanto `situacao === "AWAITING_TRADE_IN_ACCEPTANCE"`, os três campos de
-> resultado (`creditoDaTrocaParaProprietaria`, `resultadoDaVendedoraNaTroca`,
-> `resultadoTotalDaVendedora`) devem aparecer como **pendentes**, não como
-> valores.
->
-> Hoje a única forma de saber disso é olhar `situacao` — o bloco `financeiro`
-> não se autodescreve. Há uma proposta aberta de o backend passar um
-> `aceiteDaTrocaPendente: true` junto dos números, para que a interface não
-> precise correlacionar dois campos distantes para não mentir. **Decisão
-> pendente com o time de backend** — desenhe o estado "pendente" de qualquer
-> forma, porque ele existe nos dois cenários.
+```jsonc
+"liquidoDaLojaProprietaria":      { "formatado": "R$ 89.000,00" },
+"creditoDaTrocaParaProprietaria": { "formatado": "R$ 41.000,00" },
+"dinheiroDevidoAProprietaria":    { "formatado": "R$ 48.000,00" },
+"jaLiquidado":                    { "formatado": "R$ 0,00" },
+"saldoAberto":                    { "formatado": "R$ 48.000,00" },
+"aceiteDaTrocaPendente": false
+```
+
+Hierarquia de leitura na tela da vendedora: **o cliente paga** → **a Loja A
+recebe** → **eu fico com**. Na da dona: **o que combinei** → **o que já entrou**
+→ **o que falta**.
+
+> ⚠ **Estado provisório.** Quando `aceiteDaTrocaPendente` é `true`, o transbordo
+> ainda espera o aceite da dona: `creditoDaTrocaParaProprietaria` vale zero
+> **porque nada foi aceito**, não porque a operação vá dar isso. Exibir como
+> final faria um gerente rejeitar um bom negócio. O campo existe justamente para
+> a interface não precisar correlacionar com `situacao`.
 
 O **transbordo** (`destino: "OWNER_STORE"`) é um pedido de aceite que trava a
-negociação. Do lado da Loja A é uma decisão com prazo implícito: alguém está
-esperando para fechar uma venda.
+negociação. Do lado da dona é uma decisão com prazo implícito: alguém está
+esperando para fechar uma venda. Note que ela decide **sem ver** quanto a
+parceira deu ao cliente pelo usado — esse número é da parceira; a dona avalia o
+carro pelo próprio critério.
 
 #### 5.9 Liquidação
 
@@ -471,10 +530,12 @@ Enums que aparecem crus na API e precisam de rótulo em pt-BR na interface:
 
 - **pt-BR.** Dinheiro em `R$ 89.900,00`; a API já entrega `formatado` pronto —
   não reformatar no cliente.
-- **Mobile-first obrigatório:** catálogo, ficha, trava, vistoria, lâmina.
-  **Desktop-first:** negociação, liquidação, feed, credenciamento, meu estoque.
-- **Tema claro e escuro** — a lâmina pública já faz; a proposta deve cobrir os
-  dois em tudo.
+- **Mobile-first obrigatório:** catálogo, ficha, trava, vistoria, publicar
+  material. **Desktop-first:** negociação, liquidação, feed, credenciamento, meu
+  estoque.
+- **Tema claro e escuro** em tudo.
+- **Sem tela de login público, sem cadastro aberto, sem landing de venda.** O
+  acesso é por credenciamento aprovado; a única porta é a de quem já é parceiro.
 - **Rede ruim.** Vendedor em subsolo de showroom. Estados de carregamento e erro
   não são detalhe.
 - **Sem frontend legado.** Nenhuma escolha de framework foi feita; a proposta é
@@ -492,6 +553,8 @@ Coisas que parecem boas ideias e quebram o produto:
 
 | Não desenhar | Por quê |
 |---|---|
+| **Qualquer tela voltada ao consumidor** | ele não acessa a plataforma; quem o atende é a parceira, no canal dela |
+| Landing page, busca pública, cadastro aberto | a rede é fechada: só entra quem foi credenciado |
 | Chat ou negociação de margem entre lojas | o produto existe para eliminar essa conversa |
 | Leilão, lance, contraproposta | o preço líquido é fixado pela dona, não disputado |
 | Botão "cancelar trava de terceiro" para a dona | a exclusividade da trava é o que a Loja B compra ao assumir o cliente |
@@ -511,7 +574,8 @@ responder, olhando as telas:
 - [ ] Este carro está disponível para mim **e** onde ele está fisicamente?
 - [ ] Quanto tempo resta na trava, e o que eu faço para esticá-la?
 - [ ] Por que meu pedido de retorno está parado, e até quando?
-- [ ] Qual número eu posso mostrar ao cliente e qual eu não posso?
+- [ ] Este carro tem material pronto para eu anunciar hoje, ou falta foto?
+- [ ] O que eu publico aqui vai aparecer no anúncio de outra loja — está limpo?
 - [ ] Quanto eu ganho nesta operação, separado do que a outra loja recebe?
 - [ ] Quem respondia por este carro na data desta multa?
 - [ ] O que apareceu de novo na rede desde ontem?
@@ -527,6 +591,5 @@ npm install && npm run demo    # 17 atos narrados, a operação inteira
 npm start                      # API em :3000, rede semeada, chaves no console
 ```
 
-Com o servidor no ar, `GET /api/v1` lista todas as 53 rotas, e
-`GET /s/<token>/lamina.html` mostra a lâmina atual — o ponto de partida visual
-mais concreto que existe hoje.
+Com o servidor no ar, `GET /api/v1` lista todas as rotas — todas
+autenticadas, exceto `/health` e o próprio índice.

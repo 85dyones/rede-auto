@@ -1,7 +1,11 @@
 # rede-auto
 
-Rede B2B fechada para **compartilhamento de estoque e custódia física de
-veículos seminovos** entre lojistas parceiros.
+Rede B2B **fechada** para compartilhamento de estoque e custódia física de
+veículos seminovos entre lojistas parceiros.
+
+Fechada no sentido literal: **não existe superfície para o consumidor final**.
+Só lojista credenciado e logado entra. O cliente é atendido no canal da própria
+loja parceira — a plataforma nunca aparece na venda.
 
 Hoje o repasse entre lojas é combinado por telefone: o gerente da Loja B liga
 para a Loja A, negocia margem, confirma se o carro ainda está disponível e
@@ -13,7 +17,7 @@ e elimina o risco que ela cria: duas lojas vendendo o mesmo carro.
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 310 testes
+npm run check    # typecheck estrito + 324 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -155,30 +159,43 @@ A candidatura é **reprovada ao quarto voto contrário**, porque com 6 votos
 disponíveis 3 avais tornam-se aritmeticamente impossíveis. A loja padrinho não
 vota na própria indicação, e quem entra depois não vira fundador.
 
-## Apresentação white-label
+## Material de divulgação
 
-O vendedor da Loja B gera um link temporário com **o preço que ele pratica**,
-sem nenhum traço da loja proprietária. Sai em JSON, HTML (responsivo, pronto
-para imprimir) e PDF.
+A plataforma não hospeda anúncio nem manda link para cliente. O que ela entrega
+à loja parceira, já logada, é o **material pronto para ela usar no canal dela**:
 
-O que **não** aparece na lâmina, e por quê:
+- **fotos neutras** — publicadas pela loja dona, sem placa legível, sem adesivo,
+  sem fachada. É o que qualquer parceira pode republicar como se fosse próprio;
+- **ficha técnica completa**, em JSON e em PDF;
+- **o laudo cautelar** em arquivo, quando houver.
 
-| Omitido | Motivo |
+Isso desloca onde mora o anonimato. **Dentro** da rede não há segredo entre
+parceiras — elas se conhecem, e precisam ver de quem é o carro, qual o líquido e
+o que diz o laudo. O que precisa ser neutro é o material que **sai** daqui,
+porque ele vai ser republicado por outra loja.
+
+O que **não** entra no material, e por quê:
+
+| Fora | Motivo |
 |---|---|
-| Nome, CNPJ e contato da loja dona | o cliente atravessaria a Loja B |
-| Preço líquido de repasse | revela a margem da Loja B |
+| Nome, CNPJ e contato da loja dona | apareceriam no anúncio da parceira |
+| Preço líquido de repasse | é o acordo entre as duas lojas |
 | Placa completa e chassi | permitem consulta pública que devolve o proprietário |
-| Número do laudo cautelar | consultável e rastreável até quem contratou |
-| **URLs originais das fotos** | o domínio do CDN costuma ser o da própria loja |
+| **CRLV** | está no nome da loja dona — entregaria a origem |
+| **As fotos do feed** | foram tiradas para o anúncio da própria dona: adesivo, fachada, placa |
 
-A última é a que mais escapa: `cdn.primemotors.com.br/onix-1.jpg` entrega a
-origem sem que ninguém perceba. As fotos são servidas pela plataforma; sem proxy
-configurado, a lâmina sai **sem foto** em vez de vazar o domínio.
+A última é a que mais escapa. `cdn.primemotors.com.br/onix-1.jpg` entrega a
+origem sem que ninguém perceba, e por isso as fotos do feed **nunca** viram
+material: elas seguem existindo para uso interno, e o que circula é o conjunto
+neutro, servido pela plataforma.
 
-A sanitização é escrita como lista de **inclusão**, campo a campo — com spread
-do agregado, todo campo novo passaria a vazar por padrão. E um guarda de runtime
-varre a lâmina serializada antes de responder: se um termo proibido aparecer, a
-requisição falha em vez de entregar a origem.
+O kit nasce sem loja e sem preço. A parceira pode gerar a ficha já com **a marca
+dela e o preço dela** — nunca os da dona. Quem define o líquido é a dona; quem
+define o preço ao consumidor é quem vai atender o consumidor.
+
+A sanitização é escrita como lista de **inclusão**, campo a campo, e um guarda
+de runtime varre o kit antes de o download sair: se um termo proibido aparecer,
+a requisição falha em vez de entregar a origem.
 
 ## Ingestão de estoque
 
@@ -222,7 +239,7 @@ src/
 │   ├── custody/     termo de vistoria assinado e livro de responsabilidade civil
 │   ├── recall/      prioridade dono vs. custodiante e SLA em horas úteis
 │   ├── deal/        repasse, trade-in, liquidação, ATPV-e
-│   └── sharing/     link temporário e sanitização white-label
+│   └── material/    kit neutro que a parceira baixa para anunciar
 ├── application/     casos de uso: carregam, decidem, persistem, publicam
 ├── infra/           adaptadores — persistência, feeds, PDF, autenticação, seed
 ├── http/            servidor, roteador, serialização
@@ -263,8 +280,8 @@ atrasar ou nem rodar sem produzir estado inválido.
 
 ## API
 
-Autenticação por chave em `Authorization: Bearer <chave>`. As rotas `/s/*` da
-lâmina white-label são públicas.
+Autenticação por chave em `Authorization: Bearer <chave>`. **Toda** rota de
+negócio exige login — não há superfície pública.
 
 ```
 GET    /api/v1/veiculos                              catálogo da rede
@@ -278,11 +295,14 @@ POST   /api/v1/veiculos/:id/recall                   chamada de retorno
 POST   /api/v1/veiculos/:id/negociacao               monta o repasse sobre a trava
 POST   /api/v1/negociacoes/:id/confirmacao           fecha a venda
 POST   /api/v1/veiculos/:id/entrega                  entrega ao comprador (encerra os dois eixos)
-POST   /api/v1/veiculos/:id/compartilhamentos        gera o link white-label
+GET    /api/v1/veiculos/:id/material                 kit neutro para a parceira anunciar
+GET    /api/v1/veiculos/:id/material/ficha.pdf       ficha técnica em PDF
 POST   /api/v1/feeds/sincronizacao                   ingere o XML do integrador
 GET    /api/v1/notificacoes                          mural de avisos da loja
-GET    /s/:token/lamina.pdf                          lâmina em PDF (pública)
 ```
+
+Todas exigem login. As únicas rotas sem autenticação são `GET /health` e o
+índice `GET /api/v1` — não há, por construção, nenhuma superfície pública.
 
 Referência completa em [`docs/api.md`](docs/api.md). O índice das rotas também
 sai em `GET /api/v1`.
@@ -300,7 +320,7 @@ sai em `GET /api/v1`.
 ## Estado do projeto
 
 Implementado e testado: todo o domínio, os casos de uso, a API HTTP, a ingestão
-de feeds, a lâmina em três formatos e a trilha de auditoria. 310 testes,
+de feeds, o material de divulgação e a trilha de auditoria. 324 testes,
 typecheck estrito (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,
 `erasableSyntaxOnly`) sem erros.
 
@@ -328,3 +348,8 @@ entregue aqui:
 - **fotos servidas pela plataforma.** Hoje o proxy redireciona; para esconder o
   domínio também do tráfego, é preciso servir os bytes com cache. O contrato da
   rota não muda.
+- **curadoria das fotos neutras.** Decidir se um adesivo no vidro ou a fachada
+  refletida no para-brisa entregam a origem é julgamento humano — a plataforma
+  garante que o conjunto exista e cubra os ângulos, não que ele esteja limpo.
+  Borrar placa e remover marca automaticamente é trabalho de visão
+  computacional, fora do que foi entregue.

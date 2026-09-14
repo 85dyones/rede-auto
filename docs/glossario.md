@@ -15,20 +15,20 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Padrinho | `sponsorStoreId` | loja que apresentou a candidatura. Não vota na própria indicação. |
 | Titular | `UserRole.PRINCIPAL` | quem vota credenciamento, além de tudo que o gerente faz. |
 | Gerente | `UserRole.MANAGER` | preço líquido, aceite de transbordo, recall, assinatura de custódia. |
-| Vendedor | `UserRole.SALESPERSON` | abre e estende travas, monta negociação, gera lâmina. |
+| Vendedor | `UserRole.SALESPERSON` | abre e estende travas, monta negociação, baixa material. |
 
 ## Comercial
 
 | Termo | No código | O que é |
 |---|---|---|
 | Repasse | `Deal` | a operação de compra B2B casada com a venda B2C. |
-| Preço líquido de repasse | `pricing.netPrice` | o que a Loja A exige receber. Dado estritamente B2B — nunca sai numa lâmina. |
+| Preço líquido de repasse | `pricing.netPrice` | o que a Loja A exige receber. É **ela** quem define. Nunca sai no material. |
 | Preço público | `pricing.publicPrice` | preço de vitrine da dona. Referência; não vincula a Loja B. |
 | Trava comercial | `CommercialLock` | exclusividade temporária de 4h sobre um veículo. Vale contra todos, inclusive a dona. |
 | TTL da trava | `lock.expiresAt` | o prazo. Estender exige evidência de avanço no funil. |
 | Preço travado | `netPriceSnapshot` | líquido congelado na abertura da trava. É por ele que a Loja B fecha. |
 | Preço represado | `pendingNetPrice` | reprecificação da dona feita durante uma trava. Só vale quando a trava cair. |
-| Margem excedente | `sellerGrossMargin` | `preço ao consumidor − líquido`. 100% da Loja B, sem rateio. |
+| Margem excedente | `sellerPrivate.grossMargin` | `preço ao consumidor − líquido`. 100% da Loja B — e invisível para a dona. |
 | Estoque avançado | `isOnExtendedCustody` | veículo comercialmente disponível a toda a rede, mas fisicamente no pátio de outra loja. |
 | Oportunidade de balcão | — | o que o carro vira para a loja custodiante quando a trava expira: ele está na vitrine dela e livre para travar de novo. |
 
@@ -71,5 +71,7 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | ATPV-e | `AtpvEmission` | Autorização para Transferência de Propriedade de Veículo, eletrônica. Emitida pela loja proprietária ao comprador final. |
 | Placa Mercosul | `PLATE_MERCOSUL` | `ABC1D23`. O formato antigo (`ABC1234`) também é aceito. |
 | Chassi / VIN | `chassis` | 17 caracteres, sem I, O ou Q. Chave de deduplicação da rede. |
-| Lâmina | `WhiteLabelSheet` | ficha do veículo sem identificação da loja proprietária, para enviar ao cliente final. |
+| Material de divulgação | `MaterialKit` | fotos neutras + ficha + laudo que a parceira baixa para usar no canal dela. |
+| Fotos neutras | `neutralPhotos` | conjunto curado pela dona, sem placa, adesivo ou fachada. O único que circula. |
+| Ficha neutra | `NeutralSpecSheet` | ficha técnica sem nenhuma identificação de loja. Nasce sem preço. |
 | Feed | `ParsedFeed` | XML de estoque publicado pelo integrador da loja. |

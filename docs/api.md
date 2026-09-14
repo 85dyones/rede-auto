@@ -11,13 +11,15 @@ Authorization: Bearer <chave>
 Também aceita `X-Api-Key: <chave>`. Uma chave identifica um par **(loja,
 usuário)** — o papel do usuário decide o que ele pode fazer.
 
+**Não existe rota pública de negócio.** As únicas sem autenticação são
+`GET /health` e o índice `GET /api/v1`. O consumidor final não tem acesso à
+plataforma, e não há superfície voltada a ele.
+
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
 > [`decisoes.md`](decisoes.md#17-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
-
-Rotas públicas, sem chave: `GET /health`, `GET /api/v1` e todas as `/s/*`.
 
 ## Convenções
 
@@ -351,22 +353,49 @@ Exige trava ativa **da sua loja**. O líquido vem do snapshot da trava.
 (transbordo — a negociação fica `AWAITING_TRADE_IN_ACCEPTANCE` até a Loja A
 aceitar).
 
-A resposta traz o bloco `financeiro` completo:
+`precoAoConsumidor` é **opcional** — a venda ao consumidor acontece fora da
+plataforma, no canal da parceira. Aqui dentro o negócio é entre as duas lojas.
+
+A resposta traz o bloco `financeiro`, **filtrado por quem está olhando**:
 
 ```jsonc
-{
-  "liquidoDaLojaProprietaria":     { "formatado": "R$ 89.000,00" },
-  "precoAoConsumidor":             { "formatado": "R$ 96.900,00" },
-  "dinheiroDoConsumidor":          { "formatado": "R$ 54.900,00" },
-  "creditoDaTrocaParaProprietaria":{ "formatado": "R$ 41.000,00" },
-  "dinheiroDevidoAProprietaria":   { "formatado": "R$ 48.000,00" },
-  "margemDaVendedora":             { "formatado": "R$  7.900,00" },
-  "resultadoDaVendedoraNaTroca":   { "formatado": "-R$ 1.000,00" },
-  "resultadoTotalDaVendedora":     { "formatado": "R$  6.900,00" },
-  "saldoAberto":                   { "formatado": "R$ 48.000,00" },
-  "vendaAbaixoDoLiquido": false
+// o que as DUAS lojas veem — é o acordo entre elas
+"financeiro": {
+  "liquidoDaLojaProprietaria":      { "formatado": "R$ 89.000,00" },
+  "creditoDaTrocaParaProprietaria": { "formatado": "R$ 41.000,00" },
+  "dinheiroDevidoAProprietaria":    { "formatado": "R$ 48.000,00" },
+  "jaLiquidado":                    { "formatado": "R$ 0,00" },
+  "saldoAberto":                    { "formatado": "R$ 48.000,00" },
+  "liquidado": false,
+  "aceiteDaTrocaPendente": false,
+
+  // presente SÓ para a loja vendedora
+  "meusNumeros": {
+    "precoAoConsumidor":    { "formatado": "R$ 96.900,00" },
+    "valorDadoNaTroca":     { "formatado": "R$ 42.000,00" },
+    "dinheiroDoConsumidor": { "formatado": "R$ 54.900,00" },
+    "minhaMargem":          { "formatado": "R$  7.900,00" },
+    "resultadoNaTroca":     { "formatado": "-R$ 1.000,00" },
+    "resultadoTotal":       { "formatado": "R$  6.900,00" },
+    "vendaAbaixoDoLiquido": false
+  }
 }
 ```
+
+**A loja proprietária não recebe `meusNumeros`.** Numa rede em que concorrentes
+dividem estoque, a dona ver a margem da parceira destrói o modelo: bastaria
+olhar uma venda para saber quanto subir o líquido na próxima, e o incentivo para
+a parceira trazer clientes acabaria junto. Pelo mesmo motivo, o valor dado ao
+cliente na troca e a avaliação do usado também só aparecem para a vendedora.
+
+Para **terceiros** a negociação sequer existe: `404`. Nem a existência dela, nem
+quem está negociando o quê, são informação pública da rede.
+
+`aceiteDaTrocaPendente: true` avisa que o transbordo ainda espera o aceite da
+dona — enquanto isso, `creditoDaTrocaParaProprietaria` vale zero **porque nada
+foi aceito**, não porque a operação vá dar isso. A interface precisa mostrar
+esses números como provisórios, e o campo existe justamente para ela não
+precisar correlacionar com `situacao`.
 
 ### `POST /api/v1/negociacoes/:id/troca/aceite`
 
@@ -407,42 +436,107 @@ Exige `SETTLED`. Aceita CPF ou CNPJ, com dígito verificador validado.
 
 ---
 
-## Compartilhamento white-label
+## Material de divulgação
 
-### `POST /api/v1/veiculos/:id/compartilhamentos`
+A plataforma não tem rota pública. O material é **baixado pela loja parceira,
+autenticada**, para ela usar no canal dela.
 
-```jsonc
-{ "precoExibido": { "centavos": 9690000 }, "validadeHoras": 48, "exibePlaca": false }
-```
+### `GET /api/v1/veiculos/:id/material`
 
-Resposta:
+Manifesto do kit: ficha neutra, fotos disponíveis e laudo.
 
 ```jsonc
 {
-  "url":       "https://…/s/9TSI_pco8zXSqjQcVEjj4fOnk5H6bxjz",
-  "urlLamina": "https://…/s/9TSI…/lamina.html",
-  "urlPdf":    "https://…/s/9TSI…/lamina.pdf",
-  "expiraEm": "2026-08-26T13:00:00.000Z",
-  "limiteAberturas": 300
+  "veiculoId": "veh_demo_1",
+  "referencia": "EH_DEMO1",
+  "prontidao": {
+    "fotos": 4,
+    "angulosFaltando": [],          // FRONT, REAR e INTERIOR são obrigatórios
+    "temLaudoAnexado": true,
+    "pronto": true
+  },
+  "ficha": {
+    "titulo": "Chevrolet Onix 1.0 Turbo LTZ 2023",
+    "ano": "2022/2023", "quilometragem": "38.400 km", "cor": "Prata",
+    "combustivel": "Flex", "cambio": "Automatico", "portas": 4,
+    "opcionais": ["Ar-condicionado", "Direcao eletrica", "Multimidia"]
+  },
+  "fotos": [
+    { "url": "/api/v1/veiculos/veh_demo_1/material/fotos/0", "angulo": "Frente" },
+    { "url": "/api/v1/veiculos/veh_demo_1/material/fotos/1", "angulo": "Traseira" }
+  ],
+  "laudoCautelar": {
+    "aprovado": true, "situacao": "Laudo cautelar aprovado",
+    "empresa": "Cautelar Brasil",
+    "arquivoUrl": "/api/v1/veiculos/veh_demo_1/material/laudo.pdf"
+  },
+  "minhaMarca": null,
+  "geradoEm": "2026-09-14T18:00:00.000Z"
 }
 ```
 
-TTL padrão 48h, teto 7 dias. `exibePlaca` é `false` por padrão — e mesmo ligada
-a placa sai mascarada (`ABC****`).
+Ausentes **por construção**: nome e CNPJ da loja dona, preço líquido, chassi,
+placa, número do laudo, CRLV, e as URLs das fotos do feed.
 
-### `GET /s/:token` · `/lamina.html` · `/lamina.pdf` — **públicas**
+`prontidao` é o que diz se a parceira consegue anunciar. `angulosFaltando`
+aponta exatamente o que a loja dona ainda não publicou.
 
-A ficha sanitizada em três formatos. Nenhuma delas expõe a loja proprietária, o
-preço líquido, o chassi, a placa completa, o número do laudo ou o domínio
-original das fotos.
+**Parâmetros opcionais** — `?comMinhaLoja=true&preco=96900` gera o material já
+com a marca de **quem está baixando** e o preço que **ela** pratica:
 
-`409 SHARE_LINK_UNAVAILABLE` quando o link expirou, foi revogado ou estourou o
-limite de aberturas — com mensagem escrita para o cliente final ler.
+```jsonc
+"minhaMarca": {
+  "nomeFantasia": "Veloz Seminovos", "cidade": "Sao Paulo", "uf": "SP",
+  "telefone": "(19) 3201-4455",
+  "preco": { "centavos": 9690000, "formatado": "R$ 96.900,00" }
+}
+```
 
-### `GET /s/:token/fotos/:indice` — pública
+Nunca a marca da dona. Quem define o líquido é a dona; quem define o preço ao
+consumidor é quem vai atender o consumidor — e essa venda acontece fora daqui.
 
-Proxy das fotos. Redireciona para a URL original; a URL nunca aparece no HTML
-nem no JSON.
+### `GET /api/v1/veiculos/:id/material/ficha.pdf`
+
+A ficha técnica em PDF. Neutra por padrão; aceita os mesmos `comMinhaLoja` e
+`preco`. É o arquivo que circula por WhatsApp, imprime na vitrine e vai junto na
+proposta ao banco.
+
+### `GET /api/v1/veiculos/:id/material/fotos/:indice`
+
+Foto neutra, servida pela plataforma. Redireciona para o arquivo hospedado; a
+URL original das fotos do feed nunca aparece.
+
+### `GET /api/v1/veiculos/:id/material/laudo.pdf`
+
+O laudo cautelar. É o **único documento do carro** que circula na rede —
+`404 INSPECTION_FILE_NOT_FOUND` quando não há arquivo anexado.
+
+### `POST /api/v1/veiculos/:id/material/fotos`
+
+Só a **loja proprietária** publica o conjunto neutro — é ela quem tem o carro
+para fotografar.
+
+```jsonc
+{
+  "fotos": [
+    { "url": "https://midia…/frente.jpg",  "angulo": "FRONT" },
+    { "url": "https://midia…/traseira.jpg","angulo": "REAR" },
+    { "url": "https://midia…/interior.jpg","angulo": "INTERIOR" },
+    { "url": "https://midia…/painel.jpg",  "angulo": "DASHBOARD" }
+  ]
+}
+```
+
+Ângulos: `FRONT`, `REAR`, `LEFT`, `RIGHT`, `INTERIOR`, `DASHBOARD`, `ENGINE`,
+`TRUNK`, `OTHER`. Os três primeiros da lista obrigatória — frente, traseira e
+interior — faltando, a resposta é `422 MATERIAL_ANGLES_MISSING` dizendo quais.
+
+> A lista é diferente da vistoria de pátio de propósito: lá o objetivo é provar
+> avaria, aqui é vender o carro.
+
+A curadoria é humana: decidir se um adesivo no vidro entrega a origem é
+julgamento, não regra que software aplique sozinho. O que o sistema garante é
+que o conjunto exista e cubra os ângulos.
 
 ---
 
@@ -552,7 +646,6 @@ necessário para a correção do estado**.
 |---|---|---|
 | `PORT` | `3000` | porta HTTP |
 | `HOST` | `0.0.0.0` | interface |
-| `PUBLIC_BASE_URL` | `http://localhost:$PORT` | base dos links white-label |
 | `SWEEP_INTERVAL_MS` | `60000` | intervalo do varredor |
 | `MAX_BODY_BYTES` | `41943040` | teto do corpo (feeds grandes) |
 | `SEED_DEMO_DATA` | `true` | semeia as 6 fundadoras e o estoque de exemplo |

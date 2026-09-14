@@ -14,7 +14,7 @@ vocabulário, [`glossario.md`](glossario.md).
 | `Recall` | `domain/recall/recall.ts` | próprio |
 | `Deal` | `domain/deal/deal.ts` | próprio |
 | `MembershipApplication` | `domain/network/membership.ts` | próprio |
-| `ShareLink` | `domain/sharing/share-link.ts` | próprio |
+| material neutro | `domain/material/kit.ts` | derivado do `Vehicle`, sem estado próprio |
 
 **Veículo e trava são uma única fronteira.** Não existe estado válido em que o
 veículo esteja `LOCKED` e a trava, expirada. Por isso as transições devolvem os
@@ -228,22 +228,31 @@ A ordem entre ATPV-e e entrega não importa; `COMPLETED` exige os dois.
 ### Cálculo financeiro
 
 ```
-cashFromConsumer     = retailPrice − tradeInAllowance
+// visível às duas lojas — é o acordo entre elas
 tradeInCreditToOwner = transbordo ? acceptedValue : 0
 cashDueToOwner       = netPrice − tradeInCreditToOwner
-sellerGrossMargin    = retailPrice − netPrice
-sellerTradeInResult  = (transbordo ? acceptedValue : appraisedValue) − allowance
-sellerTotalResult    = sellerGrossMargin + sellerTradeInResult
+
+// sellerPrivate — só a vendedora. `null` quando ela não registrou o preço.
+cashFromConsumer     = retailPrice − tradeInAllowance
+grossMargin          = retailPrice − netPrice
+tradeInResult        = (transbordo ? acceptedValue : appraisedValue) − allowance
+totalResult          = grossMargin + tradeInResult
 ```
+
+O corte entre os dois blocos é estrutural, não de apresentação: `dealDto` exige
+o id de quem está olhando, então o compilador recusa qualquer serialização que
+não declare o espectador.
 
 Regras que a conta impõe:
 
 - `cashDueToOwner ≥ 0` — troca acima do líquido faria a Loja A dever dinheiro à
   Loja B; a operação é recusada com a sugestão de separar em duas;
 - `tradeInAllowance ≤ retailPrice`;
+- `retailPrice` é **opcional**: a venda ao consumidor acontece fora da
+  plataforma. Sem ele, os números da vendedora vêm `null` e nada mais muda;
 - `retailPrice < netPrice` é **permitido** (autonomia da Loja B, que pode
-  aceitar prejuízo no seminovo para ganhar no giro da troca) mas emite
-  `deal.selling_below_net_price`;
+  aceitar prejuízo no seminovo para ganhar no giro da troca) e emite
+  `deal.selling_below_net_price` — evento que não carrega o preço praticado;
 - liquidação parcial é aceita; nenhuma parcela pode exceder o saldo aberto;
 - cancelamento só antes de haver qualquer liquidação registrada.
 
@@ -277,14 +286,14 @@ Toda transição emite evento; a trilha de auditoria é derivada deles, não esc
 
 | Prefixo | Exemplos |
 |---|---|
-| `vehicle.*` | `listed`, `unlisted`, `withdrawn`, `available_again`, `net_price_changed`, `net_price_deferred` |
+| `vehicle.*` | `listed`, `unlisted`, `withdrawn`, `available_again`, `net_price_changed`, `net_price_deferred`, `neutral_photos_published` |
 | `lock.*` | `opened`, `extended`, `expired`, `released`, `converted` |
 | `custody.*` | `checked_out`, `checked_in`, `discrepancies_found`, `transfer_cancelled`, `delivered_to_consumer` |
 | `recall.*` | `requested`, `sla_started`, `fulfilled`, `sla_breached`, `superseded_by_sale`, `cancelled` |
 | `deal.*` | `opened`, `trade_in_accepted`, `confirmed`, `settlement_registered`, `settled`, `atpv_registered`, `completed` |
 | `feed.*` | `vehicle_created`, `vehicle_updated`, `vehicle_missing`, `duplicate_vin_detected` |
 | `membership.*` | `application_opened`, `vote_cast`, `application_approved`, `application_rejected` |
-| `sharing.*` | `link_created`, `link_revoked` |
+
 | `network.*` | `store_admitted` |
 
 Os que uma integração de notificação deveria assinar primeiro:
