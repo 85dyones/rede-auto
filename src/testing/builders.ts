@@ -15,7 +15,21 @@ import {
   StoreStatus,
   UserRole,
 } from '../domain/network/store.ts';
-import { asStoreId, asUserId, type StoreId, type UserId } from '../domain/shared/ids.ts';
+import {
+  asClusterId,
+  asStoreId,
+  asUserId,
+  type ClusterId,
+  type StoreId,
+  type UserId,
+} from '../domain/shared/ids.ts';
+
+/**
+ * A praca padrao dos testes. Existir uma so por default e proposital: o teste
+ * que quer provar a fronteira precisa **dizer** que ha duas pracas, e isso fica
+ * visivel na leitura.
+ */
+export const TEST_CLUSTER_ID: ClusterId = asClusterId('clu_test');
 
 /** CNPJs com digito verificador valido, para nao esbarrar na validacao real. */
 const VALID_CNPJS = [
@@ -58,6 +72,7 @@ export function buildStoreProfile(overrides: Partial<StoreProfile> = {}): StoreP
 export function buildStore(overrides: Partial<Store> = {}): Store {
   return {
     id: overrides.id ?? asStoreId(`str_${Math.random().toString(36).slice(2, 10)}`),
+    clusterId: overrides.clusterId ?? TEST_CLUSTER_ID,
     profile: overrides.profile ?? buildStoreProfile(),
     kind: overrides.kind ?? StoreKind.FOUNDER,
     status: overrides.status ?? StoreStatus.ACTIVE,
@@ -117,6 +132,7 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
     const storeId = asStoreId(`str_f${index + 1}`);
     founders.push({
       id: storeId,
+      clusterId: TEST_CLUSTER_ID,
       profile: buildStoreProfile({
         tradeName,
         legalName: `${tradeName} Comercio de Veiculos LTDA`,
@@ -237,6 +253,7 @@ export function buildVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
 
   return {
     id,
+    clusterId: overrides.clusterId ?? TEST_CLUSTER_ID,
     ownerStoreId,
     plate: overrides.plate ?? `ABC${String(1000 + (vehicleCounter % 9000))}`,
     chassis: overrides.chassis ?? `9BWZZZ377VT${String(100000 + vehicleCounter).slice(0, 6)}`,

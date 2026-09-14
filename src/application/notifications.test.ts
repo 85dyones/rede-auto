@@ -59,11 +59,13 @@ describe('mapa de eventos para avisos', () => {
   test('candidatura vai so para as fundadoras, menos a padrinho', () => {
     const aviso = previewNotification(
       domainEvent('membership.application_opened', 'app_1', T0, {
+        clusterId: 'clu_test',
         candidateTradeName: 'Nova Garagem',
         sponsorStoreId: 'str_a',
       }),
     );
-    assert.equal(aviso?.foundersOnly, true);
+    assert.equal(aviso?.broadcast?.foundersOnly, true);
+    assert.equal(aviso?.broadcast?.clusterId, 'clu_test', 'broadcast sem praca nao entrega a ninguem');
     assert.deepEqual(aviso?.except, ['str_a'], 'quem apresentou nao precisa ser avisado');
   });
 

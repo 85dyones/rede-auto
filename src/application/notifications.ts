@@ -14,7 +14,7 @@
 import { type DomainEvent } from '../domain/shared/events.ts';
 import type { Instant } from '../domain/shared/clock.ts';
 import { formatDuration } from '../domain/shared/clock.ts';
-import type { StoreId } from '../domain/shared/ids.ts';
+import type { ClusterId, StoreId } from '../domain/shared/ids.ts';
 import type { Store } from '../domain/network/store.ts';
 import { StoreKind, StoreStatus } from '../domain/network/store.ts';
 import type { AppContext } from './context.ts';
@@ -47,18 +47,29 @@ type Draft = {
   readonly severity: NotificationSeverity;
   readonly title: string;
   readonly body: string;
-  /** Lojas específicas; se ausente, é broadcast para a rede ativa. */
+  /** Lojas específicas; se ausente, é broadcast — e aí `broadcast` é obrigatório. */
   readonly to?: readonly (StoreId | null | undefined)[];
   /** Lojas que não devem receber, mesmo no broadcast (quem causou o evento). */
   readonly except?: readonly (StoreId | null | undefined)[];
-  /** Broadcast restrito às fundadoras (governança). */
-  readonly foundersOnly?: boolean;
+  /**
+   * Alcance do broadcast. O `clusterId` é obrigatório aqui de propósito: "avise
+   * a rede" só faz sentido dentro de **uma** praça, e um broadcast sem praça
+   * mandaria aviso de estoque de Curitiba para uma loja de outra cidade.
+   * Exigir no tipo obriga o evento a carregar a praça no payload.
+   */
+  readonly broadcast?: { readonly clusterId: ClusterId; readonly foundersOnly?: boolean };
 };
 
 function draftFor(event: DomainEvent): Draft | null {
   const payload = event.payload;
   const store = (key: string): StoreId | undefined => payload[key] as StoreId | undefined;
   const text = (key: string): string => String(payload[key] ?? '');
+  /**
+   * A praça do evento. Se um evento que faz broadcast chegar sem ela, é bug de
+   * quem emitiu — e `resolveTargets` entrega a ninguém em vez de entregar à
+   * rede errada. Silêncio é a falha segura aqui; vazamento entre praças não é.
+   */
+  const cluster = (): ClusterId => payload['clusterId'] as ClusterId;
 
   switch (event.type) {
     // -- o carro voltou para a rede -------------------------------------------
@@ -70,6 +81,10 @@ function draftFor(event: DomainEvent): Draft | null {
           payload['onExtendedCustody'] === true
             ? 'Um veículo voltou a ficar disponível na rede e está no pátio de uma loja parceira — pronto para apresentação imediata.'
             : 'Um veículo voltou a ficar disponível na rede.',
+        // Sem `except`: a custodiante e justamente quem mais precisa saber. No
+        // estoque avancado o carro esta no showroom dela e acabou de voltar a
+        // ser vendavel — e o aviso mais valioso da rede, nao ruido.
+        broadcast: { clusterId: cluster() },
       };
 
     case 'vehicle.neutral_photos_published':
@@ -207,7 +222,7 @@ function draftFor(event: DomainEvent): Draft | null {
         severity: NotificationSeverity.ACTION_REQUIRED,
         title: 'Nova candidatura para credenciamento',
         body: `${text('candidateTradeName')} foi apresentada à rede e aguarda o aval dos fundadores.`,
-        foundersOnly: true,
+        broadcast: { clusterId: cluster(), foundersOnly: true },
         except: [store('sponsorStoreId')],
       };
 
@@ -216,6 +231,7 @@ function draftFor(event: DomainEvent): Draft | null {
         severity: NotificationSeverity.INFO,
         title: 'Nova loja na rede',
         body: `${text('tradeName')} foi credenciada e já está operando.`,
+        broadcast: { clusterId: cluster() },
       };
 
     default:
@@ -268,13 +284,16 @@ async function resolveTargets(context: AppContext, draft: Draft): Promise<StoreI
     return [...new Set(explicit)].filter((id) => !excluded.has(id));
   }
 
-  const stores = draft.foundersOnly
-    ? await context.repos.stores.founders()
-    : await context.repos.stores.all();
+  const broadcast = draft.broadcast;
+  if (broadcast === undefined || broadcast.clusterId === undefined) return [];
+
+  const stores = broadcast.foundersOnly
+    ? await context.repos.stores.founders(broadcast.clusterId)
+    : await context.repos.stores.byCluster(broadcast.clusterId);
 
   return stores
     .filter((store: Store) => store.status === StoreStatus.ACTIVE)
-    .filter((store: Store) => !draft.foundersOnly || store.kind === StoreKind.FOUNDER)
+    .filter((store: Store) => !broadcast.foundersOnly || store.kind === StoreKind.FOUNDER)
     .map((store: Store) => store.id)
     .filter((id) => !excluded.has(id));
 }

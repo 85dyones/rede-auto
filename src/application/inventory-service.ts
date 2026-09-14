@@ -65,12 +65,23 @@ export type LoadedVehicle = {
  * expiracao e persistida e anunciada agora — antes de qualquer decisao ser
  * tomada sobre um estado que ja nao vale.
  */
+/**
+ * Carrega um veiculo **da praca do ator**. E o unico caminho para chegar a um
+ * veiculo a partir de um id, e e por isso que a fronteira de cluster vive aqui:
+ * uma guarda em vinte servicos se esquece; uma guarda no carregador, nao.
+ *
+ * Veiculo de outra praca responde 404, nao 403 — mesmo raciocinio da
+ * negociacao de terceiro. Para quem esta fora da praca esse carro nao existe, e
+ * distinguir "nao existe" de "existe mas nao e seu" ja entrega que existe.
+ */
 export async function loadVehicle(
   context: AppContext,
+  actor: Actor,
   vehicleId: VehicleId,
 ): Promise<Result<LoadedVehicle, DomainError>> {
   const vehicle = await context.repos.vehicles.byId(vehicleId);
   if (vehicle === undefined) return err(vehicleNotFound(vehicleId));
+  if (vehicle.clusterId !== actor.store.clusterId) return err(vehicleNotFound(vehicleId));
   return ok(await reconcile(context, vehicle));
 }
 
@@ -133,6 +144,7 @@ export async function registerVehicle(
 
   const created = createVehicle({
     id: asVehicleId(context.ids.next('veh')),
+    clusterId: actor.store.clusterId,
     ownerStoreId: actor.store.id,
     plate: input.plate,
     chassis: input.chassis,
@@ -176,7 +188,7 @@ export async function updateVehiclePricing(
 ): Promise<Result<Vehicle, DomainError>> {
   if (!hasManagerPowers(actor.user)) return err(managerRequired('alterar preco'));
 
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = updatePricing({
@@ -201,7 +213,7 @@ export async function recordInspection(
 ): Promise<Result<Vehicle, DomainError>> {
   if (!hasManagerPowers(actor.user)) return err(managerRequired('registrar laudo'));
 
-  const loaded = await loadVehicle(context, vehicleId);
+  const loaded = await loadVehicle(context, actor, vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = registerInspection({
@@ -225,7 +237,7 @@ export async function withdrawFromNetwork(
 ): Promise<Result<Vehicle, DomainError>> {
   if (!hasManagerPowers(actor.user)) return err(managerRequired('retirar veiculo da rede'));
 
-  const loaded = await loadVehicle(context, vehicleId);
+  const loaded = await loadVehicle(context, actor, vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = withdrawVehicle({
@@ -248,7 +260,7 @@ export async function relistInNetwork(
 ): Promise<Result<Vehicle, DomainError>> {
   if (!hasManagerPowers(actor.user)) return err(managerRequired('reativar anuncio'));
 
-  const loaded = await loadVehicle(context, vehicleId);
+  const loaded = await loadVehicle(context, actor, vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = relistVehicle({
@@ -277,7 +289,7 @@ export async function openCommercialLock(
   actor: Actor,
   input: OpenLockInput,
 ): Promise<Result<LoadedVehicle, DomainError>> {
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = openLock({
@@ -307,7 +319,7 @@ export async function extendCommercialLock(
   const lock = await context.repos.locks.byId(lockId);
   if (lock === undefined) return err(noActiveLock(lockId));
 
-  const loaded = await loadVehicle(context, asVehicleId(lock.vehicleId));
+  const loaded = await loadVehicle(context, actor, asVehicleId(lock.vehicleId));
   if (!loaded.ok) return loaded;
 
   // Depois da reconciliacao a trava pode ter acabado de expirar.
@@ -340,7 +352,7 @@ export async function releaseCommercialLock(
   const lock = await context.repos.locks.byId(lockId);
   if (lock === undefined) return err(noActiveLock(lockId));
 
-  const loaded = await loadVehicle(context, asVehicleId(lock.vehicleId));
+  const loaded = await loadVehicle(context, actor, asVehicleId(lock.vehicleId));
   if (!loaded.ok) return loaded;
 
   const current = loaded.value.lock ?? (await context.repos.locks.byId(lockId));
@@ -455,11 +467,25 @@ export function buildVehicleView(
   };
 }
 
+/**
+ * Busca sem a praca: quem chama diz o que quer ver, nunca *de onde*.
+ *
+ * O cluster nao e parametro de entrada em lugar nenhum da API — vem do ator, e
+ * so dele. Se fosse aceito no query string, bastaria trocar um id para ler o
+ * preco liquido de um concorrente de outra cidade. Omitir do tipo e o que torna
+ * isso impossivel de escrever, nao apenas proibido.
+ */
+export type CatalogQuery = Omit<VehicleQuery, 'clusterId'>;
+
 export async function searchCatalog(
   context: AppContext,
-  query: VehicleQuery,
+  actor: Actor,
+  query: CatalogQuery,
 ): Promise<{ items: LoadedVehicle[]; total: number }> {
-  const page = await context.repos.vehicles.search(query);
+  const page = await context.repos.vehicles.search({
+    ...query,
+    clusterId: actor.store.clusterId,
+  });
   const items: LoadedVehicle[] = [];
   for (const vehicle of page.items) items.push(await reconcile(context, vehicle));
   return { items, total: page.total };

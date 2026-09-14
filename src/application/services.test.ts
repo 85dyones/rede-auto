@@ -7,9 +7,40 @@ import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import { FuelType, TransmissionType } from '../domain/vehicle/vehicle.ts';
+import { asClusterId, asStoreId, asUserId } from '../domain/shared/ids.ts';
+import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody.ts';
 import type { Actor } from './context.ts';
-import { openCommercialLock, registerVehicle } from './inventory-service.ts';
+import { loadVehicle, openCommercialLock, registerVehicle, searchCatalog } from './inventory-service.ts';
+import { startCustodyTransfer } from './custody-service.ts';
 import { runSweep, startSweeper } from './scheduler.ts';
+
+/** Termo com as cinco fotos obrigatorias — o minimo que a custodia exige. */
+function termoDeVistoria(actor: Actor, odometro: number) {
+  const termo = sealTerm(
+    {
+      odometerKm: odometro,
+      fuelEighths: 6,
+      photos: [
+        PhotoAngle.FRONT,
+        PhotoAngle.REAR,
+        PhotoAngle.LEFT,
+        PhotoAngle.RIGHT,
+        PhotoAngle.ODOMETER,
+      ].map((angle) => ({ angle, url: `https://cdn.exemplo.com/${angle.toLowerCase()}.jpg` })),
+      damages: [],
+    },
+    {
+      name: actor.user.name,
+      document: '529.982.247-25',
+      role: 'Gerente de patio',
+      userId: actor.user.id,
+      storeId: actor.store.id,
+    },
+    T0,
+  );
+  assert.ok(termo.ok);
+  return termo.value;
+}
 
 /**
  * Testes dos casos de uso que a API nao exercita por completo: deduplicacao no
@@ -176,6 +207,126 @@ describe('varredor periodico', () => {
 
     assert.ok(erros.length > 0, 'o erro chega ao handler');
     assert.match(String(erros[0]), /banco indisponivel/);
+    await app.stop();
+  });
+});
+
+/**
+ * A fronteira entre pracas.
+ *
+ * A rede e local: o modelo inteiro (levar o carro ao showroom da parceira,
+ * devolver em 4 horas uteis) so fecha porque as lojas estao a minutos umas das
+ * outras. Quando a segunda praca existir, o risco nao e de usabilidade — e de
+ * vazamento: preco liquido de concorrente de outra cidade, estoque que nunca
+ * vai poder ser negociado, aviso de rede caindo na caixa errada.
+ *
+ * Estes testes existem para que a segunda praca custe uma linha de seed, e nao
+ * uma auditoria de todas as consultas do sistema.
+ */
+describe('fronteira entre pracas', () => {
+  /** Duas pracas com uma loja cada. A de Londrina nao e parceira: e estranha. */
+  async function duasPracas() {
+    const base = await novaApp();
+    const curitiba = base.lojaA.store.clusterId;
+    const londrina = asClusterId('clu_londrina');
+
+    const forasteira: Actor = {
+      store: { ...base.lojaB.store, id: asStoreId('str_forasteira'), clusterId: londrina },
+      user: { ...base.lojaB.user, id: asUserId('usr_forasteira'), storeId: asStoreId('str_forasteira') },
+    };
+    await base.app.context.repos.stores.save(forasteira.store);
+    await base.app.context.repos.users.save(forasteira.user);
+
+    const carro = await registerVehicle(base.app.context, base.lojaA, {
+      plate: 'RGT4B71',
+      chassis: '9BWZZZ377VT004251',
+      specs: ficha,
+      publicPrice: fromReais(92_900),
+      netPrice: fromReais(85_000),
+    });
+    assert.ok(carro.ok);
+
+    return { ...base, curitiba, londrina, forasteira, carro: carro.value };
+  }
+
+  test('o carro nasce na praca da loja dona', async () => {
+    const { app, lojaA, carro } = await duasPracas();
+    assert.equal(carro.clusterId, lojaA.store.clusterId);
+    await app.stop();
+  });
+
+  test('para a loja de outra praca o carro nao existe — 404, nao 403', async () => {
+    const { app, forasteira, carro } = await duasPracas();
+
+    const visto = await loadVehicle(app.context, forasteira, carro.id);
+    assert.ok(!visto.ok);
+    assert.equal(visto.error.kind, 'NOT_FOUND', 'distinguir "nao e seu" de "nao existe" ja entrega que existe');
+    await app.stop();
+  });
+
+  test('a busca nao mistura estoque de pracas diferentes', async () => {
+    const { app, lojaA, forasteira } = await duasPracas();
+
+    const daCasa = await searchCatalog(app.context, lojaA, { limit: 50 });
+    assert.equal(daCasa.total, 1, 'a loja da praca ve o proprio estoque');
+
+    const deFora = await searchCatalog(app.context, forasteira, { limit: 50 });
+    assert.equal(deFora.total, 0, 'a loja de Londrina nao ve o estoque de Curitiba');
+    await app.stop();
+  });
+
+  test('nao se trava um carro de outra praca', async () => {
+    const { app, forasteira, carro } = await duasPracas();
+
+    const trava = await openCommercialLock(app.context, forasteira, { vehicleId: carro.id });
+    assert.ok(!trava.ok);
+    assert.equal(trava.error.kind, 'NOT_FOUND');
+    await app.stop();
+  });
+
+  test('nao se pede custodia de um carro de outra praca', async () => {
+    const { app, lojaA, forasteira, carro } = await duasPracas();
+
+    const saida = await startCustodyTransfer(app.context, forasteira, {
+      vehicleId: carro.id,
+      toStoreId: forasteira.store.id,
+      purpose: TransferPurpose.EXTENDED_STOCK,
+      checkout: termoDeVistoria(lojaA, 38_400),
+    });
+    assert.ok(!saida.ok);
+    assert.equal(saida.error.kind, 'NOT_FOUND');
+    await app.stop();
+  });
+
+  test('fundadora de uma praca nao conta no quorum da outra', async () => {
+    const { app, curitiba, londrina } = await duasPracas();
+
+    const deCuritiba = await app.context.repos.stores.founders(curitiba);
+    const deLondrina = await app.context.repos.stores.founders(londrina);
+
+    assert.equal(deCuritiba.length, 6, 'as 6 fundadoras do piloto');
+    assert.equal(deLondrina.length, 1, 'Londrina constitui o proprio quorum');
+
+    const emCuritiba = new Set(deCuritiba.map((loja) => loja.id));
+    for (const loja of deLondrina) {
+      assert.ok(!emCuritiba.has(loja.id), 'nenhuma fundadora vota nas duas pracas');
+    }
+    await app.stop();
+  });
+
+  test('o aviso de rede fica dentro da praca que o gerou', async () => {
+    const { app, clock, lojaA, forasteira, carro } = await duasPracas();
+
+    await openCommercialLock(app.context, lojaA, { vehicleId: carro.id });
+    clock.advance(5 * HOUR);
+    await runSweep(app.context);
+
+    const laFora = await app.context.repos.notifications.forStore({ storeId: forasteira.store.id });
+    assert.equal(
+      laFora.filter((aviso) => aviso.eventType === 'vehicle.available_again').length,
+      0,
+      'carro que voltou a rede em Curitiba nao interessa — e nao pode ser visto — em Londrina',
+    );
     await app.stop();
   });
 });

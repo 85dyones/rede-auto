@@ -37,10 +37,11 @@ export async function syncStoreFeed(
   }
 
   const existing = await context.repos.vehicles.byOwner(actor.store.id);
-  const chassisOwners = await context.repos.vehicles.chassisOwners();
+  const chassisOwners = await context.repos.vehicles.chassisOwners(actor.store.clusterId);
 
   const report = ingestFeed(input.xml, {
     runId: asIngestionRunId(context.ids.next('ing')),
+    clusterId: actor.store.clusterId,
     storeId: actor.store.id,
     now: context.clock.now(),
     provider: input.provider,

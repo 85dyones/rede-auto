@@ -42,7 +42,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     const somenteDisponiveis = request.query.get('somenteDisponiveis') !== 'false';
-    const page = await searchCatalog(context, {
+    const page = await searchCatalog(context, actor.value, {
       commercialStatus: somenteDisponiveis
         ? [CommercialStatus.AVAILABLE]
         : [CommercialStatus.AVAILABLE, CommercialStatus.LOCKED],
@@ -72,7 +72,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
-    const page = await searchCatalog(context, { ownerStoreId: actor.value.store.id, limit: 200 });
+    const page = await searchCatalog(context, actor.value, { ownerStoreId: actor.value.store.id, limit: 200 });
     const at = context.clock.now();
     return json(200, {
       total: page.total,
@@ -85,7 +85,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
-    const page = await searchCatalog(context, {
+    const page = await searchCatalog(context, actor.value, {
       custodianStoreId: actor.value.store.id,
       limit: 200,
     });
@@ -101,7 +101,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
-    const loaded = await loadVehicle(context, asVehicleId(request.params['id'] as string));
+    const loaded = await loadVehicle(context, actor.value, asVehicleId(request.params['id'] as string));
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
 
     const at = context.clock.now();
@@ -140,7 +140,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
-    const loaded = await loadVehicle(context, result.value.id);
+    const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
     return json(201, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
@@ -169,7 +169,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
-    const loaded = await loadVehicle(context, result.value.id);
+    const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
     return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
@@ -195,7 +195,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
-    const loaded = await loadVehicle(context, result.value.id);
+    const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
     return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));

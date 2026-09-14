@@ -40,7 +40,7 @@ export async function publishMaterial(
     );
   }
 
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = publishNeutralPhotos({
@@ -83,7 +83,7 @@ export async function downloadMaterial(
   actor: Actor,
   input: DownloadMaterialInput,
 ): Promise<Result<MaterialKit, DomainError>> {
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const vehicle = loaded.value.vehicle;

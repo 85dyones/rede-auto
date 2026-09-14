@@ -62,7 +62,7 @@ export async function startDeal(
   actor: Actor,
   input: OpenDealInput,
 ): Promise<Result<{ deal: Deal; financials: DealFinancials }, DomainError>> {
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const lock = loaded.value.lock;
@@ -159,7 +159,7 @@ export async function confirmDealSale(
   const deal = await context.repos.deals.byId(dealId);
   if (deal === undefined) return err(dealNotFound(dealId));
 
-  const loaded = await loadVehicle(context, deal.vehicleId);
+  const loaded = await loadVehicle(context, actor, deal.vehicleId);
   if (!loaded.ok) return loaded;
 
   const at = context.clock.now();
@@ -351,6 +351,7 @@ async function returnVehicleToNetwork(context: AppContext, deal: Deal): Promise<
       vehicle.id,
       at,
       {
+        clusterId: vehicle.clusterId,
         reason: 'DEAL_CANCELLED',
         dealId: deal.id,
         custodianStoreId: vehicle.physical.custodianStoreId,

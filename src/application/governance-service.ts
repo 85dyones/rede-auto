@@ -121,6 +121,7 @@ async function admit(
   await context.repos.memberships.save(result.value.application);
   await publish(context, [
     domainEvent('network.store_admitted', result.value.store.id, context.clock.now(), {
+      clusterId: result.value.store.clusterId,
       applicationId: application.id,
       tradeName: result.value.store.profile.tradeName,
       sponsorStoreId: result.value.store.sponsorStoreId,

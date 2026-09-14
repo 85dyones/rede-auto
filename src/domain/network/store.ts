@@ -10,7 +10,7 @@
 import { type Result, ok, err, combine } from '../shared/result.ts';
 import { type DomainError, validationError } from '../shared/errors.ts';
 import type { Instant } from '../shared/clock.ts';
-import type { StoreId, UserId } from '../shared/ids.ts';
+import type { ClusterId, StoreId, UserId } from '../shared/ids.ts';
 import { parseCnpj, requireText, requireOneOf } from '../shared/validation.ts';
 
 export const StoreKind = {
@@ -57,6 +57,11 @@ export type StoreProfile = {
 
 export type Store = {
   readonly id: StoreId;
+  /**
+   * A praca a que esta loja pertence. Imutavel: mudar de cluster nao e editar
+   * um campo — e sair de uma rede e se credenciar em outra, com quorum novo.
+   */
+  readonly clusterId: ClusterId;
   readonly profile: StoreProfile;
   readonly kind: StoreKind;
   readonly status: StoreStatus;
@@ -140,6 +145,15 @@ export function isFounder(store: Store): boolean {
   return store.kind === StoreKind.FOUNDER;
 }
 
+/**
+ * Fundadora **desta** praca. O sufixo existe porque `isFounder` sozinho vira
+ * uma pergunta perigosa quando ha mais de um cluster: fundadora de Curitiba nao
+ * vota em Londrina.
+ */
+export function isFounderOf(store: Store, clusterId: ClusterId): boolean {
+  return isFounder(store) && store.clusterId === clusterId;
+}
+
 export function canTransact(store: Store): boolean {
   return store.status === StoreStatus.ACTIVE;
 }
@@ -148,9 +162,13 @@ export function canTransact(store: Store): boolean {
  * Voto de credenciamento exige loja fundadora ativa e usuario titular.
  * Concentrar a regra aqui evita reimplementa-la em cada rota.
  */
-export function canVoteOnMembership(store: Store, user: NetworkUser): boolean {
+export function canVoteOnMembership(
+  store: Store,
+  user: NetworkUser,
+  clusterId: ClusterId = store.clusterId,
+): boolean {
   return (
-    isFounder(store) &&
+    isFounderOf(store, clusterId) &&
     canTransact(store) &&
     user.active &&
     user.storeId === store.id &&

@@ -28,7 +28,7 @@ import {
 import { type DomainEvent, domainEvent } from '../shared/events.ts';
 import { type Transition, transitioned } from '../shared/transition.ts';
 import type { Instant } from '../shared/clock.ts';
-import type { ApplicationId, StoreId, UserId } from '../shared/ids.ts';
+import type { ClusterId, ApplicationId, StoreId, UserId } from '../shared/ids.ts';
 import {
   type NetworkUser,
   type Store,
@@ -62,6 +62,12 @@ export type MembershipVote = {
 
 export type MembershipApplication = {
   readonly id: ApplicationId;
+  /**
+   * A praca em que a candidata quer entrar — herdada da padrinho. Governanca e
+   * por cluster: fundadora de Curitiba nao vota em candidata de Londrina, e o
+   * quorum de 3 e contado dentro de uma praca so.
+   */
+  readonly clusterId: ClusterId;
   readonly candidate: StoreProfile;
   /** Loja da rede que apresentou a candidata. Responde pela indicacao. */
   readonly sponsorStoreId: StoreId;
@@ -152,6 +158,7 @@ export function openApplication(
 
   const application: MembershipApplication = {
     id: command.id,
+    clusterId: command.sponsor.clusterId,
     candidate: command.candidate,
     sponsorStoreId: command.sponsor.id,
     openedAt: command.now,
@@ -163,6 +170,7 @@ export function openApplication(
 
   return transitioned(application, [
     domainEvent('membership.application_opened', application.id, command.now, {
+      clusterId: application.clusterId,
       candidateCnpj: application.candidate.cnpj,
       candidateTradeName: application.candidate.tradeName,
       sponsorStoreId: application.sponsorStoreId,
@@ -347,6 +355,7 @@ export function admitApprovedStore(
 
   const store: Store = {
     id: newStoreId,
+    clusterId: application.clusterId,
     profile: application.candidate,
     kind: 'MEMBER',
     status: 'ACTIVE',

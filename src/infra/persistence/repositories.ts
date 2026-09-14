@@ -10,6 +10,7 @@
 
 import type {
   ApplicationId,
+  ClusterId,
   CustodyTransferId,
   DealId,
   LockId,
@@ -20,6 +21,7 @@ import type {
 } from '../../domain/shared/ids.ts';
 import type { Instant } from '../../domain/shared/clock.ts';
 import type { DomainEvent } from '../../domain/shared/events.ts';
+import type { Cluster } from '../../domain/cluster/cluster.ts';
 import type { NetworkUser, Store } from '../../domain/network/store.ts';
 import type { MembershipApplication } from '../../domain/network/membership.ts';
 import type { Vehicle } from '../../domain/vehicle/vehicle.ts';
@@ -32,12 +34,25 @@ import { isOpen as isRecallOpen } from '../../domain/recall/recall.ts';
 import type { Deal } from '../../domain/deal/deal.ts';
 import type { Notification } from '../../application/notifications.ts';
 
+export type ClusterRepository = {
+  save(cluster: Cluster): Promise<void>;
+  byId(id: ClusterId): Promise<Cluster | undefined>;
+  bySlug(slug: string): Promise<Cluster | undefined>;
+  all(): Promise<Cluster[]>;
+};
+
 export type StoreRepository = {
   save(store: Store): Promise<void>;
   byId(id: StoreId): Promise<Store | undefined>;
+  /**
+   * CNPJ e unico na instalacao inteira, nao por praca: a mesma loja em duas
+   * redes locais seria um tunel de estoque entre elas, exatamente o que a
+   * fronteira existe para impedir.
+   */
   byCnpj(cnpj: string): Promise<Store | undefined>;
-  all(): Promise<Store[]>;
-  founders(): Promise<Store[]>;
+  byCluster(clusterId: ClusterId): Promise<Store[]>;
+  /** Fundadoras **desta** praca. Sem cluster nao existe quorum. */
+  founders(clusterId: ClusterId): Promise<Store[]>;
 };
 
 export type UserRepository = {
@@ -49,10 +64,17 @@ export type UserRepository = {
 export type MembershipRepository = {
   save(application: MembershipApplication): Promise<void>;
   byId(id: ApplicationId): Promise<MembershipApplication | undefined>;
-  pending(): Promise<MembershipApplication[]>;
+  pending(clusterId: ClusterId): Promise<MembershipApplication[]>;
 };
 
 export type VehicleQuery = {
+  /**
+   * Obrigatorio, e de proposito. Uma busca sem praca devolveria estoque de
+   * lojas que nunca vao conseguir negociar entre si — e, pior, revelaria preco
+   * liquido de concorrente de outra cidade. Exigir no tipo faz o compilador
+   * cobrar em toda chamada, em vez de depender de lembrar.
+   */
+  readonly clusterId: ClusterId;
   readonly commercialStatus?: readonly CommercialStatus[];
   readonly ownerStoreId?: StoreId;
   readonly custodianStoreId?: StoreId;
@@ -73,7 +95,8 @@ export type VehicleRepository = {
   byOwner(storeId: StoreId): Promise<Vehicle[]>;
   search(query: VehicleQuery): Promise<{ items: Vehicle[]; total: number }>;
   /** Chassi -> loja dona, para detectar duplicidade entre lojas na ingestao. */
-  chassisOwners(): Promise<Map<string, StoreId>>;
+  /** Chassi -> loja dona **dentro da praca**. Duplicidade nao cruza cluster. */
+  chassisOwners(clusterId: ClusterId): Promise<Map<string, StoreId>>;
 };
 
 export type LockRepository = {
@@ -136,6 +159,7 @@ export type NotificationRepository = {
 };
 
 export type Repositories = {
+  readonly clusters: ClusterRepository;
   readonly stores: StoreRepository;
   readonly users: UserRepository;
   readonly memberships: MembershipRepository;
@@ -154,6 +178,27 @@ export type Repositories = {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+class InMemoryClusterRepository implements ClusterRepository {
+  readonly #byId = new Map<string, Cluster>();
+
+  async save(cluster: Cluster): Promise<void> {
+    this.#byId.set(cluster.id, clone(cluster));
+  }
+  async byId(id: ClusterId): Promise<Cluster | undefined> {
+    const found = this.#byId.get(id);
+    return found === undefined ? undefined : clone(found);
+  }
+  async bySlug(slug: string): Promise<Cluster | undefined> {
+    for (const cluster of this.#byId.values()) {
+      if (cluster.slug === slug) return clone(cluster);
+    }
+    return undefined;
+  }
+  async all(): Promise<Cluster[]> {
+    return [...this.#byId.values()].map(clone);
+  }
 }
 
 class InMemoryStoreRepository implements StoreRepository {
@@ -175,8 +220,13 @@ class InMemoryStoreRepository implements StoreRepository {
   async all(): Promise<Store[]> {
     return [...this.#byId.values()].map(clone);
   }
-  async founders(): Promise<Store[]> {
-    return [...this.#byId.values()].filter((store) => store.kind === 'FOUNDER').map(clone);
+  async byCluster(clusterId: ClusterId): Promise<Store[]> {
+    return [...this.#byId.values()].filter((store) => store.clusterId === clusterId).map(clone);
+  }
+  async founders(clusterId: ClusterId): Promise<Store[]> {
+    return [...this.#byId.values()]
+      .filter((store) => store.kind === 'FOUNDER' && store.clusterId === clusterId)
+      .map(clone);
   }
 }
 
@@ -205,8 +255,10 @@ class InMemoryMembershipRepository implements MembershipRepository {
     const found = this.#byId.get(id);
     return found === undefined ? undefined : clone(found);
   }
-  async pending(): Promise<MembershipApplication[]> {
-    return [...this.#byId.values()].filter((app) => app.status === 'PENDING').map(clone);
+  async pending(clusterId: ClusterId): Promise<MembershipApplication[]> {
+    return [...this.#byId.values()]
+      .filter((app) => app.status === 'PENDING' && app.clusterId === clusterId)
+      .map(clone);
   }
 }
 
@@ -238,6 +290,7 @@ class InMemoryVehicleRepository implements VehicleRepository {
       value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 
     const matches = [...this.#byId.values()].filter((vehicle) => {
+      if (vehicle.clusterId !== query.clusterId) return false;
       if (query.commercialStatus !== undefined && !query.commercialStatus.includes(vehicle.commercialStatus)) {
         return false;
       }
@@ -264,9 +317,10 @@ class InMemoryVehicleRepository implements VehicleRepository {
     return { items: matches.slice(offset, offset + limit).map(clone), total: matches.length };
   }
 
-  async chassisOwners(): Promise<Map<string, StoreId>> {
+  async chassisOwners(clusterId: ClusterId): Promise<Map<string, StoreId>> {
     const index = new Map<string, StoreId>();
     for (const vehicle of this.#byId.values()) {
+      if (vehicle.clusterId !== clusterId) continue;
       if (vehicle.commercialStatus === CommercialStatus.SOLD) continue;
       index.set(vehicle.chassis, vehicle.ownerStoreId);
     }
@@ -450,6 +504,7 @@ class InMemoryNotificationRepository implements NotificationRepository {
 
 export function createInMemoryRepositories(): Repositories {
   return {
+    clusters: new InMemoryClusterRepository(),
     stores: new InMemoryStoreRepository(),
     users: new InMemoryUserRepository(),
     memberships: new InMemoryMembershipRepository(),

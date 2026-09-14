@@ -2,6 +2,7 @@
  * Rotas de rede e governanca: lojas, credenciamento e votacao dos fundadores.
  */
 
+import { notFoundError } from '../../domain/shared/errors.ts';
 import { asApplicationId } from '../../domain/shared/ids.ts';
 import { VoteDecision } from '../../domain/network/membership.ts';
 import type { AppContext } from '../../application/context.ts';
@@ -13,21 +14,43 @@ import {
 } from '../../application/governance-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
-import { applicationDto, storeDto } from '../serialize.ts';
+import { applicationDto, clusterDto, storeDto } from '../serialize.ts';
 import { asObject, optionalText, oneOf } from '../parse.ts';
 import { requireActor } from './support.ts';
 
 export function registerNetworkRoutes(router: Router, context: AppContext): void {
-  router.get('/api/v1/lojas', async () => {
-    const stores = await context.repos.stores.all();
+  /** As lojas da **sua** praca. Nao existe "todas as lojas da instalacao". */
+  router.get('/api/v1/lojas', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const stores = await context.repos.stores.byCluster(actor.value.store.clusterId);
     return json(200, {
       total: stores.length,
       lojas: stores.map(storeDto),
     });
   });
 
-  router.get('/api/v1/lojas/fundadoras', async () => {
-    const founders = await context.repos.stores.founders();
+  /** A praca em que esta loja opera: alcance declarado e municipios atendidos. */
+  router.get('/api/v1/cluster', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const cluster = await context.repos.clusters.byId(actor.value.store.clusterId);
+    if (cluster === undefined) {
+      return errorResponse(
+        notFoundError('CLUSTER_NOT_FOUND', 'A praca desta loja nao foi encontrada.'),
+        request.requestId,
+      );
+    }
+    return json(200, { cluster: clusterDto(cluster) });
+  });
+
+  router.get('/api/v1/lojas/fundadoras', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const founders = await context.repos.stores.founders(actor.value.store.clusterId);
     return json(200, {
       total: founders.length,
       avaisNecessarios: context.policies.governance.requiredApprovals,
@@ -54,8 +77,11 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     return json(200, applicationDto(result.value.application, result.value.tally, result.value.admittedStore));
   });
 
-  router.get('/api/v1/credenciamentos', async () => {
-    const pending = await context.repos.memberships.pending();
+  router.get('/api/v1/credenciamentos', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const pending = await context.repos.memberships.pending(actor.value.store.clusterId);
     const views = [];
     for (const application of pending) {
       const view = await viewApplication(context, application.id);

@@ -24,7 +24,7 @@ import { type Result, err, ok } from '../../domain/shared/result.ts';
 import { type DomainError, validationError } from '../../domain/shared/errors.ts';
 import { type DomainEvent, domainEvent } from '../../domain/shared/events.ts';
 import type { Instant } from '../../domain/shared/clock.ts';
-import type { IngestionRunId, StoreId, VehicleId } from '../../domain/shared/ids.ts';
+import type { ClusterId, IngestionRunId, StoreId, VehicleId } from '../../domain/shared/ids.ts';
 import { equals as moneyEquals } from '../../domain/shared/money.ts';
 import {
   type Vehicle,
@@ -87,6 +87,7 @@ export type IngestionReport = {
 
 export type IngestionContext = {
   readonly runId: IngestionRunId;
+  readonly clusterId: ClusterId;
   readonly storeId: StoreId;
   readonly now: Instant;
   /** Integrador declarado. Se ausente, o formato e detectado pelo conteudo. */
@@ -94,9 +95,11 @@ export type IngestionContext = {
   /** Veiculos que esta loja ja tem na plataforma. */
   readonly existing: readonly Vehicle[];
   /**
-   * Chassi -> loja dona, em toda a rede. E a defesa contra o mesmo carro
+   * Chassi -> loja dona, **dentro da praca**. E a defesa contra o mesmo carro
    * anunciado por duas lojas, que e a duplicidade de venda que a plataforma
-   * existe para impedir.
+   * existe para impedir. Nao cruza cluster de proposito: o mesmo carro em duas
+   * pracas e improvavel, e se acontecer nao gera conflito de venda — as lojas
+   * nunca se encontram.
    */
   readonly chassisOwners: ReadonlyMap<string, StoreId>;
   readonly nextVehicleId: () => VehicleId;
@@ -228,6 +231,7 @@ function createFromRecord(
 ): Result<Vehicle, DomainError> {
   return createVehicle({
     id: context.nextVehicleId(),
+    clusterId: context.clusterId,
     ownerStoreId: context.storeId,
     plate: record.plate,
     chassis: record.chassis,

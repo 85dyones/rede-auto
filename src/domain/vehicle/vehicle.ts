@@ -28,7 +28,7 @@ import {
 import { type DomainEvent, domainEvent } from '../shared/events.ts';
 import { type Transition, transitioned, unchanged } from '../shared/transition.ts';
 import type { Instant } from '../shared/clock.ts';
-import type { CustodyTransferId, LockId, StoreId, VehicleId } from '../shared/ids.ts';
+import type { ClusterId, CustodyTransferId, LockId, StoreId, VehicleId } from '../shared/ids.ts';
 import { type Money, equals as moneyEquals, format as formatMoney, gt, isPositive } from '../shared/money.ts';
 import {
   parseChassis,
@@ -250,6 +250,13 @@ export const NO_FEED_SOURCE: FeedSource = {
 
 export type Vehicle = {
   readonly id: VehicleId;
+  /**
+   * A praca em que este carro circula — sempre a da loja dona. Denormalizado de
+   * proposito: e o que permite a busca filtrar sem juncao, e o que um indice em
+   * `(cluster_id, commercial_status)` vai cobrir quando isso sair da memoria.
+   * Imutavel, como `ownerStoreId`.
+   */
+  readonly clusterId: ClusterId;
   /** Dona do veiculo. Nao muda: a rede compartilha estoque, nao transfere titularidade. */
   readonly ownerStoreId: StoreId;
   readonly plate: string;
@@ -284,6 +291,7 @@ export type Vehicle = {
 
 export type CreateVehicleInput = {
   readonly id: VehicleId;
+  readonly clusterId: ClusterId;
   readonly ownerStoreId: StoreId;
   readonly plate: string;
   readonly chassis: string;
@@ -308,6 +316,7 @@ export function createVehicle(input: CreateVehicleInput): Result<Vehicle, Domain
   const inspection = input.inspection ?? MISSING_INSPECTION;
   const vehicle: Vehicle = {
     id: input.id,
+    clusterId: input.clusterId,
     ownerStoreId: input.ownerStoreId,
     plate: identity.value.plate.plate,
     chassis: identity.value.chassis,

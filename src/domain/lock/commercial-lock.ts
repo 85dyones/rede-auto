@@ -542,6 +542,8 @@ function settleCommercialStatusAfterLock(
   return {
     status: CommercialStatus.AVAILABLE,
     listingEvent: domainEvent('vehicle.available_again', vehicle.id, now, {
+      // O broadcast precisa saber a praca: "voltou para a rede" e uma rede so.
+      clusterId: vehicle.clusterId,
       custodianStoreId: vehicle.physical.custodianStoreId,
       ownerStoreId: vehicle.ownerStoreId,
       /** Verdadeiro no cenario de estoque avancado: livre para a rede, parado na Loja B. */

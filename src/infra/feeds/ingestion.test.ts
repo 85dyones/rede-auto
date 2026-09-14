@@ -9,7 +9,12 @@ import { asIngestionRunId, asLockId, asVehicleId, type StoreId } from '../../dom
 import { fromReais } from '../../domain/shared/money.ts';
 import { DAY } from '../../domain/shared/clock.ts';
 import { unwrap } from '../../domain/shared/result.ts';
-import { atYardOf, buildFoundingNetwork, buildVehicle } from '../../testing/builders.ts';
+import {
+  atYardOf,
+  buildFoundingNetwork,
+  buildVehicle,
+  TEST_CLUSTER_ID,
+} from '../../testing/builders.ts';
 import { motorsFeed, revendaMaisFeed } from '../../testing/fixtures/feeds.ts';
 
 const network = buildFoundingNetwork(6);
@@ -22,6 +27,7 @@ let idCounter = 0;
 function context(overrides: Partial<IngestionContext> = {}): IngestionContext {
   return {
     runId: asIngestionRunId('ing_0001'),
+    clusterId: TEST_CLUSTER_ID,
     storeId: lojaA.id,
     now: T0,
     existing: [],

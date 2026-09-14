@@ -168,13 +168,20 @@ console.log(`  Relogio simulado. Inicio: ${relogio()}`);
 console.log('=============================================================');
 
 // ---------------------------------------------------------------------------
-ato('A rede e as 6 lojas fundadoras');
+ato('A praca do piloto e as 6 lojas fundadoras');
 
+diz(`Cluster: ${seed.cluster.name} (${seed.cluster.state}) — raio operacional de ${seed.cluster.operatingRadiusKm} km`);
+diz(`Municipios atendidos: ${seed.cluster.cities.length}`);
+diz('');
 for (const seeded of seed.stores) {
   diz(`${seeded.store.profile.tradeName.padEnd(22)} ${seeded.store.profile.city}/${seeded.store.profile.state}`);
 }
 destaque(
-  `Credenciar loja nova exige ${context.policies.governance.requiredApprovals} avais entre ${context.policies.governance.founderCount} fundadoras.`,
+  `Credenciar loja nova exige ${context.policies.governance.requiredApprovals} avais entre ${context.policies.governance.founderCount} fundadoras — desta praca.`,
+);
+destaque(
+  'A rede e local, e isso nao e detalhe de lancamento: o SLA de 4 horas uteis so e ' +
+    'honesto porque o carro sai de um patio e chega no outro dentro da manha.',
 );
 
 // ---------------------------------------------------------------------------
@@ -199,7 +206,7 @@ destaque(
 // ---------------------------------------------------------------------------
 ato(`${lojaB.store.profile.tradeName} encontra o carro no catalogo da rede`);
 
-const encontrado = unwrap(await loadVehicle(context, onixId));
+const encontrado = unwrap(await loadVehicle(context, lojaB, onixId));
 const visao = buildVehicleView(encontrado, lojaB.store.id, clock.now());
 diz(`${visao.vehicle.specs.brand} ${visao.vehicle.specs.model} ${visao.vehicle.specs.version} ${visao.vehicle.specs.modelYear}`);
 diz(`Preco publico da dona:  ${brl(visao.vehicle.pricing.publicPrice)}`);
@@ -219,7 +226,7 @@ const saida = unwrap(
 );
 diz(`Termo de saida assinado por ${lojaA.store.profile.tradeName}: odometro 38.400 km, combustivel 6/8.`);
 
-const emTransito = unwrap(await loadVehicle(context, onixId));
+const emTransito = unwrap(await loadVehicle(context, lojaA, onixId));
 diz(`Situacao fisica: ${emTransito.vehicle.physical.state}`);
 destaque(
   `Responsabilidade civil ainda e da ${lojaA.store.profile.tradeName}: quem nao conferiu o carro nao herda o risco dele.`,
@@ -230,7 +237,7 @@ avanca(3 * HOUR, 'o carro chega ao patio da Loja B');
 unwrap(
   await completeCustodyTransfer(context, lojaB, saida.transfer.id, termo(context, lojaB, 38_437, 6)),
 );
-const noPatioDaB = unwrap(await loadVehicle(context, onixId));
+const noPatioDaB = unwrap(await loadVehicle(context, lojaB, onixId));
 destaque(`Entrada assinada. A responsabilidade passa AGORA para ${lojaB.store.profile.tradeName}.`);
 diz(`Situacao comercial: ${noPatioDaB.vehicle.commercialStatus} — o carro segue ofertado a toda a rede.`);
 
@@ -290,7 +297,7 @@ avanca(6 * HOUR, 'o prazo da trava se esgota sem fechamento');
 const varredura = await runSweep(context);
 diz(`Varredor: ${varredura.expiredLocks} trava(s) expirada(s).`);
 
-const liberado = unwrap(await loadVehicle(context, onixId));
+const liberado = unwrap(await loadVehicle(context, lojaB, onixId));
 diz(`Situacao comercial: ${liberado.vehicle.commercialStatus}`);
 diz(`Situacao fisica:    ${liberado.vehicle.physical.state} no patio de ${lojaB.store.profile.tradeName}`);
 destaque('O carro voltou a ser ofertado a toda a rede — e nao saiu do lugar. Nao houve frete de devolucao.');

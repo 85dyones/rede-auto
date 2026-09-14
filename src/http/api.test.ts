@@ -902,6 +902,37 @@ describe('credenciamento pelos fundadores', () => {
     const stores = await api<{ total: number }>('GET', '/api/v1/lojas', { key: PRIME });
     assert.equal(stores.body.total, 7);
   });
+
+  test('a praca se apresenta com alcance declarado', async () => {
+    const response = await api<{
+      cluster: {
+        nome: string;
+        identificador: string;
+        uf: string;
+        municipios: string[];
+        raioOperacionalKm: number;
+        situacao: string;
+      };
+    }>('GET', '/api/v1/cluster', { key: PRIME });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.cluster.identificador, 'curitiba-rmc');
+    assert.equal(response.body.cluster.uf, 'PR');
+    assert.equal(response.body.cluster.situacao, 'ACTIVE');
+    assert.ok(
+      response.body.cluster.municipios.includes('Curitiba'),
+      'o piloto e Curitiba e regiao',
+    );
+    assert.ok(
+      response.body.cluster.raioOperacionalKm <= 300,
+      'raio acima disso e o SLA de recall deixa de ser cumprivel',
+    );
+  });
+
+  test('sem chave nao se descobre nem em que praca a instalacao opera', async () => {
+    const response = await api('GET', '/api/v1/cluster');
+    assert.equal(response.status, 401);
+  });
 });
 
 describe('sincronizacao de feed', () => {

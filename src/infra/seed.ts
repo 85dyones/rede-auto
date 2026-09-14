@@ -1,7 +1,8 @@
 /**
  * Constituicao da rede para desenvolvimento e demonstracao.
  *
- * Cria as 6 lojas fundadoras com titular e vendedor, chaves de API previsiveis
+ * Cria o cluster do piloto — Curitiba e Regiao Metropolitana — com as 6 lojas
+ * fundadoras, titular e vendedor de cada uma, chaves de API previsiveis
  * e um estoque inicial de exemplo. Serve para poder exercitar a API por
  * completo em um `npm start` sem preparar nada antes.
  *
@@ -10,7 +11,8 @@
  */
 
 import { StoreKind, StoreStatus, UserRole, type NetworkUser, type Store } from '../domain/network/store.ts';
-import { asStoreId, asUserId, asVehicleId } from '../domain/shared/ids.ts';
+import { asClusterId, asStoreId, asUserId, asVehicleId } from '../domain/shared/ids.ts';
+import { type Cluster, ClusterStatus } from '../domain/cluster/cluster.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import { DAY } from '../domain/shared/clock.ts';
 import {
@@ -33,17 +35,29 @@ export type SeededStore = {
 };
 
 export type SeedResult = {
+  readonly cluster: Cluster;
   readonly stores: readonly SeededStore[];
   readonly vehicles: readonly Vehicle[];
 };
 
+/**
+ * O piloto. Todas as fundadoras cabem num raio em que o carro sai de um patio e
+ * chega no outro dentro da manha — que e o que faz o SLA de 4 horas uteis ser
+ * uma promessa, e nao uma ficcao.
+ *
+ * Sao Jose dos Pinhais fica a ~15 km de Curitiba, Colombo a ~18, Pinhais a ~12,
+ * Araucaria a ~27. O raio declarado de 60 km cobre a regiao com folga e ainda
+ * fica bem abaixo do teto de 300 km em que a custodia fisica deixa de fechar.
+ */
+const PILOT_CLUSTER_SLUG = 'curitiba-rmc';
+
 const FOUNDERS = [
-  { slug: 'prime', tradeName: 'Prime Motors', city: 'Campinas', state: 'SP', cnpj: '11222333000181' },
-  { slug: 'veloz', tradeName: 'Veloz Seminovos', city: 'Sao Paulo', state: 'SP', cnpj: '04252011000110' },
-  { slug: 'central', tradeName: 'Garagem Central', city: 'Ribeirao Preto', state: 'SP', cnpj: '34028316000103' },
-  { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Curitiba', state: 'PR', cnpj: '33000167000101' },
-  { slug: 'sul', tradeName: 'Sul Car', city: 'Belo Horizonte', state: 'MG', cnpj: '60746948000112' },
-  { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Porto Alegre', state: 'RS', cnpj: '47960950000121' },
+  { slug: 'prime', tradeName: 'Prime Motors', city: 'Curitiba', state: 'PR', cnpj: '11222333000181' },
+  { slug: 'veloz', tradeName: 'Veloz Seminovos', city: 'Sao Jose dos Pinhais', state: 'PR', cnpj: '04252011000110' },
+  { slug: 'central', tradeName: 'Garagem Central', city: 'Curitiba', state: 'PR', cnpj: '34028316000103' },
+  { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Colombo', state: 'PR', cnpj: '33000167000101' },
+  { slug: 'sul', tradeName: 'Sul Car', city: 'Araucaria', state: 'PR', cnpj: '60746948000112' },
+  { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Pinhais', state: 'PR', cnpj: '47960950000121' },
 ] as const;
 
 const DEMO_VEHICLES = [
@@ -141,19 +155,44 @@ export async function seedFoundingNetwork(
   options: SeedOptions = {},
 ): Promise<SeedResult> {
   const now = context.clock.now();
+
+  const cluster: Cluster = {
+    id: asClusterId(`clu_${PILOT_CLUSTER_SLUG.replaceAll('-', '_')}`),
+    name: 'Curitiba e Regiao',
+    slug: PILOT_CLUSTER_SLUG,
+    state: 'PR',
+    cities: [
+      'Curitiba',
+      'Sao Jose dos Pinhais',
+      'Colombo',
+      'Araucaria',
+      'Pinhais',
+      'Campo Largo',
+      'Almirante Tamandare',
+      'Piraquara',
+      'Fazenda Rio Grande',
+      'Quatro Barras',
+    ],
+    operatingRadiusKm: 60,
+    status: ClusterStatus.ACTIVE,
+    foundedAt: now,
+  };
+  await context.repos.clusters.save(cluster);
+
   const stores: SeededStore[] = [];
 
   for (const [index, founder] of FOUNDERS.entries()) {
     const storeId = asStoreId(`str_${founder.slug}`);
     const store: Store = {
       id: storeId,
+      clusterId: cluster.id,
       profile: {
         legalName: `${founder.tradeName} Comercio de Veiculos LTDA`,
         tradeName: founder.tradeName,
         cnpj: founder.cnpj,
         city: founder.city,
         state: founder.state,
-        phone: `19${3200 + index}4455`,
+        phone: `41${3200 + index}4455`,
         email: `contato@${founder.slug}.com.br`,
         responsibleName: `Titular ${founder.tradeName}`,
       },
@@ -197,7 +236,7 @@ export async function seedFoundingNetwork(
   }
 
   const vehicles: Vehicle[] = [];
-  if (options.includeVehicles === false) return { stores, vehicles };
+  if (options.includeVehicles === false) return { cluster, stores, vehicles };
 
   for (const [index, spec] of DEMO_VEHICLES.entries()) {
     const owner = stores[spec.ownerIndex];
@@ -205,6 +244,7 @@ export async function seedFoundingNetwork(
 
     const created = createVehicle({
       id: asVehicleId(`veh_demo_${index + 1}`),
+      clusterId: cluster.id,
       ownerStoreId: owner.store.id,
       plate: spec.plate,
       chassis: spec.chassis,
@@ -259,7 +299,7 @@ export async function seedFoundingNetwork(
     }
   }
 
-  return { stores, vehicles };
+  return { cluster, stores, vehicles };
 }
 
 /** Resumo legivel das chaves criadas, impresso no start em desenvolvimento. */

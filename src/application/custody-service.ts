@@ -75,7 +75,7 @@ export async function startCustodyTransfer(
     return err(forbiddenError('MANAGER_ROLE_REQUIRED', 'Somente gerente ou titular assina a saida do veiculo.'));
   }
 
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const destination = await context.repos.stores.byId(input.toStoreId);
@@ -120,7 +120,7 @@ export async function completeCustodyTransfer(
   const transfer = await context.repos.transfers.byId(transferId);
   if (transfer === undefined) return err(transferNotFound(transferId));
 
-  const loaded = await loadVehicle(context, asVehicleId(transfer.vehicleId));
+  const loaded = await loadVehicle(context, actor, asVehicleId(transfer.vehicleId));
   if (!loaded.ok) return loaded;
 
   const transition = checkIn({
@@ -174,7 +174,7 @@ export async function abortCustodyTransfer(
   const transfer = await context.repos.transfers.byId(transferId);
   if (transfer === undefined) return err(transferNotFound(transferId));
 
-  const loaded = await loadVehicle(context, asVehicleId(transfer.vehicleId));
+  const loaded = await loadVehicle(context, actor, asVehicleId(transfer.vehicleId));
   if (!loaded.ok) return loaded;
 
   const transition = cancelTransfer({
@@ -206,7 +206,7 @@ export async function deliverVehicleToConsumer(
   vehicleId: VehicleId,
   finalTerm: InspectionTerm,
 ): Promise<Result<{ vehicle: Vehicle; deal: Deal | null }, DomainError>> {
-  const loaded = await loadVehicle(context, vehicleId);
+  const loaded = await loadVehicle(context, actor, vehicleId);
   if (!loaded.ok) return loaded;
 
   const transition = deliverToConsumer({
@@ -294,7 +294,7 @@ export async function requestVehicleRecall(
     return err(forbiddenError('MANAGER_ROLE_REQUIRED', 'Somente gerente ou titular chama o veiculo de volta.'));
   }
 
-  const loaded = await loadVehicle(context, input.vehicleId);
+  const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
   const lock = loaded.value.lock;
