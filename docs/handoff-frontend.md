@@ -1,7 +1,7 @@
 # Handoff de frontend — rede-auto
 
 **Para:** Claude Design · **De:** time de backend · **Status:** API implementada e
-testada (531 testes), frontend inexistente.
+testada (562 testes), frontend inexistente.
 
 Este documento é o briefing para a proposta visual. Tudo aqui está ancorado no
 contrato real da API — os JSON citados são respostas de verdade, capturadas do
@@ -21,6 +21,13 @@ estoque entre si. Quando a Loja B tem um cliente para um carro que está na Loja
 A, hoje isso se resolve no WhatsApp: negocia margem, confirma disponibilidade,
 combina o frete. É moroso, e a lentidão mata a venda. A plataforma substitui
 essa conversa.
+
+**O que mudou desde a primeira versão deste handoff.** O produto cresceu em
+quatro camadas que a proposta visual precisa cobrir, e todas têm superfície
+própria na §5: **empresa acima da loja** (uma empresa pode ter vários pátios),
+**financeiro** (adesão e mensalidade, zero taxa por transação), **conduta**
+(quebras de protocolo medidas pelo sistema) e **ciclo de vida do membro**
+(credenciamento, desligamento por moção, saída voluntária).
 
 **Local importa para o design.** O piloto é Curitiba e Região — 10 municípios,
 raio declarado de 60 km, todas as fundadoras dentro dele. Isso muda premissas
@@ -67,6 +74,16 @@ Um usuário pertence a **uma** loja. A mesma pessoa nunca vê a rede de dois
 ângulos ao mesmo tempo — mas vê o mesmo carro de ângulos diferentes conforme o
 papel da loja dela naquele carro (dona, custodiante, interessada).
 
+**Empresa e loja são coisas diferentes, e a interface precisa refletir isso.**
+Uma empresa (o contrato) pode ter vários pátios. O que é da empresa: pagar, ser
+fundadora, endossar, ser suspensa por inadimplência, sair da rede. O que é da
+loja: custódia, estoque, trava, vistoria — o carro está em *um* pátio.
+
+Consequência direta de layout: **o titular alterna entre dois contextos**, e as
+telas dele não são as mesmas do vendedor. Financeiro, governança, conduta e saída
+são da empresa; catálogo, travas, recalls e vistorias são do pátio em que a
+pessoa está. Não misture as duas listas numa navegação só.
+
 ---
 
 ## 3. A decisão de design que define o produto
@@ -103,7 +120,7 @@ olha — ver `vocePode` e `prioridade` na seção 5.
 
 ---
 
-## 4. Os oito problemas difíceis
+## 4. Os dez problemas difíceis
 
 ### P1 · O cartão de veículo tem que contar duas histórias
 
@@ -300,6 +317,54 @@ o que a pessoa está realmente assinando.
 Divergências entre saída e entrada (rodou demais, combustível a menos, avaria
 nova) viram registro objetivo. Quando aparecem, são a base de uma conversa sobre
 dinheiro entre parceiros — merecem destaque, não uma linha de log.
+
+### P9 · A entrega tem coordenada, e a coordenada é conferida
+
+O protocolo de devolução tem quatro passos, e cada um é uma tela diferente para
+uma pessoa diferente:
+
+1. quem está com o carro **marca a retirada** pela parceira;
+2. quem recebe **informa a chegada ao pátio** — é isso que começa a janela de 4h;
+3. ao devolver, quem levou **declara a entrega com geolocalização**;
+4. quem recebe **dá o aceite**, e é o aceite que move a custódia.
+
+O passo 3 acontece **em pé, no pátio, com o celular na mão**, e a coordenada é
+conferida contra o pátio de destino num raio de 500 m. Fora dele, a declaração é
+recusada com a distância no erro: `"A coordenada informada está a 16807 m do
+pátio de destino."`
+
+Isso muda o desenho da tela: o erro não é um beco, é uma **instrução**. Mostre a
+distância, mostre onde é o pátio de destino, e deixe claro que basta declarar de
+lá. Nunca trate como falha do usuário — quem está a 16 km provavelmente clicou
+antes de sair, e o app precisa dizer isso sem acusar.
+
+O passo 4 tem prazo: 4 horas úteis. Passado isso vira quebra de protocolo
+registrada contra quem recebeu (P10). A tela de quem recebe precisa desse
+contador tanto quanto a de quem entrega.
+
+### P10 · Dois eixos de suspensão, e eles não se confundem
+
+Uma loja pode estar parada por dois motivos completamente diferentes, e a
+interface que os misturar vai mentir:
+
+| | Quem é atingido | Por quê | Sai de |
+|---|---|---|---|
+| **Inadimplência** | a **empresa**, e com ela todos os pátios | 30 dias de atraso | pagar |
+| **Conduta** | o **pátio**, só ele | 3 quebras de protocolo em 12 meses | a janela móvel andar |
+
+A empresa inadimplente para inteira — matriz e filiais. O pátio que quebrou
+protocolo para sozinho, e a matriz segue operando.
+
+E há uma diferença que a tela precisa comunicar: **a suspensão por conduta
+termina sozinha**. A janela é móvel de 12 meses, e quando a quebra mais antiga
+sai dela o pátio reabre sem ninguém fazer nada. Por isso o registro de conduta
+traz `janelaAliviaEm` — sem essa data, o lojista vê "3 de 3" e conclui que está
+banido para sempre.
+
+Em nenhum dos dois casos a custódia é interrompida: o carro de terceiro no pátio
+suspenso continua podendo voltar para a dona. Se a tela sugerir que a loja
+suspensa "não pode fazer nada", ela vai impedir exatamente a ação que precisa
+acontecer.
 
 ---
 
@@ -526,6 +591,128 @@ as coisas por telefone.
 
 ---
 
+### Governança e contrato — o mundo do titular
+
+As cinco telas seguintes formam um bloco à parte, e o layout deve tratá-las
+assim: são da **empresa**, não do pátio, e quem entra nelas é o titular. Um
+vendedor não deveria esbarrar nelas navegando.
+
+#### 5.11 Financeiro da empresa
+
+*Quem:* titular. *Decisão:* "o que eu pago, por quê, e estou em dia?"
+
+`GET /api/v1/financeiro`. Duas receitas, e **nenhuma por transação** — isso é
+argumento de venda, não detalhe: quem usa mais não paga mais por usar.
+
+| | Fundadora | Depois |
+|---|---|---|
+| Adesão (uma vez) | R$ 3.000 | R$ 6.000 |
+| Mensalidade da empresa, 1ª loja inclusa | R$ 599 | R$ 599 |
+| Cada loja adicional | R$ 159 | R$ 159 |
+
+A API entrega `memoriaDeCalculo` pronta (`empresa`, `patiosAdicionais`,
+`porPatioAdicional`). **Mostre a conta, não só o total**: "R$ 599 + R$ 159 × 1" é
+o que faz o lojista conferir de cabeça e não ligar para o suporte.
+
+`tabela.congelada` é `true` só quando a tabela da empresa difere da vigente —
+quando as duas coincidem, anunciar congelamento prometeria um desconto que ainda
+não existe. Quando for `true`, é destaque: a fundadora está pagando menos que a
+tabela de hoje, e ela precisa ver isso.
+
+Estados de cobrança: `OPEN`, `PAID`, `VOID`. `diasEmAtraso` é o número que leva à
+suspensão aos 30 — mostre a distância até lá, não só o número cru.
+
+#### 5.12 Empresa e pátios
+
+*Quem:* titular. *Decisão:* "quem somos na rede, e quero abrir mais um pátio."
+
+`GET /api/v1/empresas` (cada uma com `lojas`, a contagem que é base da fatura) e
+`POST /api/v1/lojas` para abrir um pátio novo.
+
+O formulário de pátio novo tem uma armadilha que o design precisa desarmar: o
+CNPJ tem de ter a **mesma raiz** (8 primeiros dígitos) da empresa. Uma raiz
+diferente devolve `BRANCH_CNPJ_MISMATCH` — e a mensagem certa não é "CNPJ
+inválido", é "esse CNPJ é de outra empresa; empresa nova entra por candidatura".
+
+O formulário também pede a **coordenada do pátio**, obrigatória. Não é campo de
+cadastro burocrático: é o que torna a entrega verificável (P9). Um mapa com pin
+arrastável resolve; um par de campos lat/lng não.
+
+#### 5.13 Conduta
+
+*Quem:* titular e gerente. *Decisão:* "estamos perto de ser suspensos?"
+
+`GET /api/v1/conduta` — só dos pátios da própria empresa. O registro alheio
+aparece apenas no fundamento de uma moção de desligamento.
+
+Cada pátio traz `quebrasNaJanela` de `limite`, a lista com `descricao` legível de
+cada quebra, e `janelaAliviaEm`. Esta tela **não é um painel de vergonha**: ela
+existe para o lojista corrigir antes de chegar a três. Um contador "1 de 3" com a
+data em que vira "0 de 3" comunica isso; uma lista vermelha de infrações não.
+
+#### 5.14 Desligamento (moção)
+
+*Quem:* titular de fundadora. *Decisão:* "esta empresa deveria sair da rede?"
+
+`POST /api/v1/desligamentos` · `POST /api/v1/desligamentos/:id/apoios`.
+
+Três coisas que a tela precisa comunicar, e todas são contraintuitivas:
+
+1. **Não existe botão de recusar**, como no credenciamento. O silêncio já é
+   contra. Quem não concorda simplesmente não apoia;
+2. o **fundamento** é o registro, não a opinião de quem abriu. Mostre
+   `fundamento` com destaque — suspensões por conduta, quebras, espécies — porque
+   é ele que separa governança de briga de concorrentes. Sem reincidência
+   registrada, a moção nem abre (`NO_RECIDIVISM_ON_RECORD`);
+3. o quórum é **proporcional** (dois terços), diferente dos três endossos fixos
+   da admissão. `apuracao` traz `necessarios`, `faltam` e `alcancavel`.
+
+A moção caduca em 21 dias, e **o desfecho por inércia é "fica"**. Isso merece
+estar na tela: a barra de progresso que expira é uma informação diferente de uma
+que trava.
+
+#### 5.15 Saída voluntária
+
+*Quem:* titular. *Decisão:* "quero sair — o que preciso encerrar antes?"
+
+`GET /api/v1/saida` funciona **antes** de avisar, e essa é a tela mais
+importante deste grupo: quem pensa em sair precisa ver o custo antes de decidir.
+
+É um **checklist**, e a API já entrega no formato:
+
+```jsonc
+"pendencias": [
+  { "codigo": "AVISO_EM_CURSO", "descricao": "o aviso previo ainda esta correndo" },
+  { "codigo": "CUSTODIA_DE_TERCEIROS", "descricao": "ha carro de outra loja no seu patio" }
+],
+"contagens": {
+  "carrosDeTerceirosNoSeuPatio": 1,
+  "carrosSeusEmPatioAlheio": 0,
+  "travasAbertas": 0,
+  "negociacoesAbertas": 0,
+  "cobrancasEmAberto": { "centavos": 0, "formatado": "R$ 0,00" }
+}
+```
+
+Cada item vem com `descricao` pronta — **não traduza código na tela**. E cada
+contagem deve levar à lista correspondente: "1 carro de outra loja no seu pátio"
+é inútil sem o link para *qual* carro.
+
+Duas coisas que o design precisa acertar:
+
+- **não há botão de "sair agora"**. A saída se conclui sozinha no momento em que
+  a última pendência fecha. A tela mostra progresso, não um gatilho — e o estado
+  final chega como aviso;
+- o prazo de 30 dias é o **menos** importante dos dois requisitos. Uma barra de
+  progresso temporal em destaque, com o checklist embaixo, comunicaria o
+  contrário do que a regra diz. O checklist vem primeiro.
+
+`DELETE /api/v1/saida` desiste, e a volta é limpa. O botão de desistir deve estar
+visível durante todo o processo — ninguém deveria sentir que atravessou uma porta
+de mão única.
+
+---
+
 ### Complementar — completa o quadro
 
 **Meu estoque** (`/veiculos/meus`) — onde cada carro está e quem está negociando.
@@ -563,11 +750,16 @@ Não use lorem ipsum. Estes são os dados semeados pela aplicação:
 
 **Praça:** Curitiba e Região (PR) · 10 municípios · raio operacional 60 km
 
-**Lojas fundadoras (10):** Prime Motors (Curitiba/PR) · Veloz Seminovos (São
+**Empresas fundadoras (10):** Prime Motors (Curitiba/PR) · Veloz Seminovos (São
 José dos Pinhais/PR) · Garagem Central (Curitiba/PR) · Norte Automóveis
 (Colombo/PR) · Sul Car (Araucária/PR) · Via Livre Veículos (Pinhais/PR) ·
 Planalto Veículos (Campo Largo/PR) · Atlas Automóveis (Curitiba/PR) · Iguaçu
 Motors (Piraquara/PR) · Bandeirante Seminovos (Fazenda Rio Grande/PR)
+
+**Onze pátios, não dez:** a Prime Motors tem dois — matriz no centro e **Prime
+Motors Boqueirão**, a ~6 km. É o caso que a mensalidade cobra (R$ 599 + R$ 159) e
+o que obriga a interface a distinguir empresa de pátio. Use essa empresa nas
+telas de financeiro e de saída; ela é a única que exercita os dois.
 
 São dez porque dez é o alvo do piloto, **não** porque dez seja exigido: a praça
 abre com quem entrou na janela de fundação. Nenhuma tela deve exibir "x de 10" —
@@ -587,7 +779,22 @@ tarde" é uma frase que cabe na tela.
 | VW T-Cross 1.0 TSI Comfortline | 2022/2022 | 44.900 | R$ 118.500 | R$ 108.900 | Norte |
 
 Nomes de pessoas: Titular Prime Motors, Vendedor Veloz Seminovos, Roberto
-Conferente (gerente de pátio), Ana Paula Ribeiro (compradora).
+Conferente (gerente de pátio), Ana Paula Ribeiro (compradora), Gerente Prime
+Boqueirão.
+
+**Números reais para as telas novas:**
+
+| Onde | Valor |
+|---|---|
+| Mensalidade Prime (2 pátios) | R$ 758,00 — R$ 599 + R$ 159 × 1 |
+| Mensalidade das demais (1 pátio) | R$ 599,00 |
+| Adesão de fundadora, já quitada | R$ 3.000,00 |
+| Tabela vigente | `2026-03` |
+| Congelamento de fundadora | 24 meses |
+| Janela de fundação do piloto | 90 dias |
+| Quebras para suspender o pátio | 3 em 12 meses |
+| Quórum de desligamento (10 fundadoras) | 6 apoios de 9 elegíveis |
+| Aviso prévio de saída | 30 dias |
 
 ---
 
@@ -606,6 +813,13 @@ está em [`glossario.md`](glossario.md).
 | **Transbordo** | "repasse da troca" |
 | **Laudo cautelar** | "vistoria cautelar", "laudo" sozinho |
 | **Ficha** (o PDF que circula) | "anúncio" |
+| **Empresa** (o contrato) | "grupo", "matriz" como sinônimo de empresa |
+| **Pátio** / **loja** (o endereço) | "filial" quando o texto fala do primeiro |
+| **Endosso** | "voto", "aprovação" |
+| **Moção de desligamento** | "expulsão", "banimento", "exclusão" |
+| **Quebra de protocolo** | "infração", "penalidade", "falta" |
+| **Aviso de saída** | "cancelamento de conta", "churn" |
+| **Adesão** | "taxa de entrada", "caução" (não é caução: não volta) |
 
 Duas ressalvas que valem mais que a tabela, porque é onde ela costuma ser mal
 aplicada:
@@ -626,7 +840,19 @@ em telas diferentes: a **ficha do veículo** é a tela de detalhe (§5.2), e a
 Enums que aparecem crus na API e precisam de rótulo em pt-BR na interface:
 `AVAILABLE` → Disponível · `LOCKED` → Em negociação · `SOLD` → Vendido ·
 `DRAFT` → Sem laudo · `WITHDRAWN` → Fora da rede · `AT_YARD` → No pátio ·
-`IN_TRANSIT` → Em trânsito · `DELIVERED_TO_CONSUMER` → Entregue.
+`IN_TRANSIT` → Em trânsito · `AWAITING_ACCEPTANCE` → Entregue, aguardando aceite ·
+`DELIVERED_TO_CONSUMER` → Entregue.
+
+Situação da **empresa**: `ACTIVE` → Ativa · `SUSPENDED` → Suspensa por
+inadimplência · `LEAVING` → Em saída · `EXITED` → Fora da rede.
+Situação do **pátio**: `ACTIVE` → Aberto · `SUSPENDED` → Suspenso por conduta ·
+`EXITED` → Fechado. Os dois rótulos de `SUSPENDED` são diferentes de propósito
+(P10) — nunca escreva só "Suspensa".
+
+Espécies de quebra: `RECALL_SLA` → Não devolveu no prazo · `PICKUP_NOT_COLLECTED`
+→ Não retirou o carro disponibilizado · `DROPOFF_NOT_ACKNOWLEDGED` → Não deu
+aceite na entrega · `TRANSFER_ABANDONED` → Deixou o carro em trânsito. A API já
+entrega `descricao` legível em cada uma — prefira a dela.
 
 ---
 
@@ -635,8 +861,9 @@ Enums que aparecem crus na API e precisam de rótulo em pt-BR na interface:
 - **pt-BR.** Dinheiro em `R$ 89.900,00`; a API já entrega `formatado` pronto —
   não reformatar no cliente.
 - **Mobile-first obrigatório:** catálogo, ficha, trava, vistoria, publicar
-  material. **Desktop-first:** negociação, liquidação, feed, credenciamento, meu
-  estoque.
+  material, **declaração de entrega** (é feita em pé, no pátio) e **aceite de
+  entrega**. **Desktop-first:** negociação, liquidação, feed, credenciamento, meu
+  estoque, financeiro, conduta, desligamento, saída.
 - **Tema claro e escuro** em tudo.
 - **Sem tela de login público, sem cadastro aberto, sem landing de venda.** O
   acesso é por credenciamento aprovado; a única porta é a de quem já é parceiro.
@@ -667,6 +894,11 @@ Coisas que parecem boas ideias e quebram o produto:
 | Contador regressivo cru para o SLA | ignora horas úteis (P6) |
 | Avaliação/rating entre lojas | governança aqui é endosso de fundadoras, não reputação social. O registro de conduta é objetivo (prazos vencidos) e alimenta governança, nunca o catálogo |
 | Notificação para toda trava aberta | afogaria os avisos que exigem ação |
+| Botão de "recusar" candidatura ou "votar contra" desligamento | o silêncio já é o contra; registrar contra expõe quem defendeu quem e constrói retaliação |
+| Botão de "sair agora" | a saída se conclui sozinha quando a última pendência fecha; um gatilho manual deixaria a empresa pronta e presa |
+| Painel de conduta como ranking ou vergonha pública | o registro é da própria empresa, serve para corrigir antes de chegar a três, e nunca alimenta o catálogo |
+| Taxa por transação em qualquer lugar da interface | ela não existe: cobrar por repasse fechado incentivaria combinar por fora e subdeclarar valor |
+| Exibir "x de 10 fundadoras" | o número é contado, não fixo — a praça abre com quem entrou na janela |
 
 ---
 
@@ -677,6 +909,10 @@ responder, olhando as telas:
 
 - [ ] Este carro está disponível para mim **e** onde ele está fisicamente?
 - [ ] Quanto tempo resta na trava, e o que eu faço para esticá-la?
+- [ ] Por que minha mensalidade é esse valor, conferindo a conta de cabeça?
+- [ ] Estou perto de ser suspenso por conduta, e quando isso alivia?
+- [ ] Minha empresa está parada por dinheiro ou meu pátio por protocolo?
+- [ ] Se eu quisesse sair da rede, o que precisaria encerrar antes?
 - [ ] Por que meu pedido de retorno está parado, e até quando?
 - [ ] Este carro tem material pronto para eu anunciar hoje, ou falta foto?
 - [ ] O que eu publico aqui vai aparecer no anúncio de outra loja — está limpo?
@@ -691,7 +927,7 @@ responder, olhando as telas:
 O caminho mais curto para ver o sistema funcionando:
 
 ```bash
-npm install && npm run demo    # 18 atos narrados, a operação inteira
+npm install && npm run demo    # 20 atos narrados, a operação inteira
 npm start                      # API em :3000, rede semeada, chaves no console
 ```
 
