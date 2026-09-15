@@ -1,25 +1,30 @@
 /**
- * Credenciamento de novas lojas — endosso das fundadoras, decisao da plataforma.
+ * Credenciamento — quem decide quem entra sao os membros.
  *
- * A rede e fechada e qualificada, e a qualificacao vem do ENDOSSO: uma fundadora
- * coloca a reputacao dela atras de uma candidata que ela conhece de praca. Mas o
- * endosso nao e voto — quem admite e a plataforma.
+ * A rede e fechada e qualificada, e a qualificacao vem do ENDOSSO: uma
+ * fundadora coloca a reputacao dela atras de uma candidata que conhece de
+ * praca. Tres endossos credenciam. A plataforma so opera — ela nao vota, nao
+ * veta e nao admite.
  *
- * A diferenca nao e burocratica, e de incentivo. Enquanto o credenciamento era
- * decidido por quorum, as fundadoras tinham nas maos o poder de barrar
- * concorrencia direta e chamar isso de criterio. Tirar a decisao delas remove o
- * conflito sem jogar fora o que elas sabem: continua sendo a palavra de quem
- * conhece a candidata que sustenta a qualidade da operacao.
+ * Tres consequencias de desenho:
  *
- * Duas consequencias de desenho:
+ * 1. NAO existe endosso contrario. Quem tem restricao simplesmente nao endossa.
+ *    Modelar rejeicao daria a cada fundadora um veto individual sobre
+ *    concorrencia direta, que e exatamente o que nao se quer.
  *
- * 1. NAO existe voto contrario. Uma fundadora que tem restricao simplesmente nao
- *    endossa — e a ausencia de endosso ja e o sinal. Modelar rejeicao devolveria
- *    o poder de veto pela porta dos fundos.
+ * 2. Como nao ha recusa, existe PRAZO: a candidatura caduca se nao juntar os
+ *    endossos na janela. Sem isso, "pendente para sempre" viraria uma recusa
+ *    que ninguem precisa assinar — e a candidata nunca saberia o que aconteceu.
  *
- * 2. A plataforma PODE admitir abaixo do endosso recomendado, mas nao em
- *    silencio: precisa registrar a justificativa, e ela fica na candidatura.
- *    E o que impede o endosso de virar enfeite sem transformar em veto.
+ * 3. O terceiro endosso ja credencia. Nao ha passo intermediario entre a
+ *    decisao e a loja poder operar: seriam dois estados para o mesmo fato, e o
+ *    segundo so existiria para alguem esquecer dele.
+ *
+ * O limite conhecido deste desenho: endossos numa praca de 60 km nao sao
+ * independentes — as fundadoras se conhecem, compram nos mesmos leiloes. Tres
+ * endossos medem reputacao no mercado, nao saude financeira. O contrapeso nao
+ * esta aqui, esta na exposicao graduada de quem acaba de entrar e no registro
+ * de conduta entre lojas.
  */
 
 import { type Result, err, ok } from '../shared/result.ts';
@@ -30,9 +35,9 @@ import {
   ruleViolation,
   validationError,
 } from '../shared/errors.ts';
-import { domainEvent } from '../shared/events.ts';
-import { type Transition, transitioned } from '../shared/transition.ts';
-import type { Instant } from '../shared/clock.ts';
+import { type DomainEvent, domainEvent } from '../shared/events.ts';
+import { type Transition, transitioned, unchanged } from '../shared/transition.ts';
+import { type Instant, DAY } from '../shared/clock.ts';
 import type { ClusterId, ApplicationId, StoreId, UserId } from '../shared/ids.ts';
 import { TradeInStance } from '../vehicle/vehicle.ts';
 import {
@@ -49,6 +54,8 @@ export const MembershipStatus = {
   REJECTED: 'REJECTED',
   /** Retirada pelo padrinho antes da decisao. */
   WITHDRAWN: 'WITHDRAWN',
+  /** Venceu o prazo sem juntar os endossos. Nao e recusa: e silencio com data. */
+  LAPSED: 'LAPSED',
 } as const;
 export type MembershipStatus = (typeof MembershipStatus)[keyof typeof MembershipStatus];
 
@@ -80,39 +87,41 @@ export type MembershipApplication = {
   /** No maximo um endosso por fundadora; endossar de novo atualiza a nota. */
   readonly endorsements: readonly Endorsement[];
   readonly decidedAt: Instant | null;
-  /** Quem decidiu, do lado da plataforma, e por que. */
-  readonly decidedBy: string | null;
-  readonly decisionNote: string | null;
-  /**
-   * Preenchida quando a plataforma admite com menos endossos que o recomendado.
-   * Ficar registrada e o que mantem o endosso significando alguma coisa.
-   */
-  readonly endorsementOverride: string | null;
   /** Preenchido quando a aprovacao resulta na criacao efetiva da loja. */
   readonly resultingStoreId: StoreId | null;
 };
 
 export type GovernancePolicy = {
-  /** Quantas lojas fundadoras existem. Fixo em 6 na constituicao da praca. */
+  /** Quantas lojas fundadoras existem. Fixo em 10 na constituicao da praca. */
   readonly founderCount: number;
   /**
-   * Endossos que a plataforma espera ver antes de admitir. NAO e quorum: nao
-   * aprova sozinho nem bloqueia. E a linha abaixo da qual admitir exige
-   * justificativa escrita.
+   * Endossos que credenciam. E decisorio: o terceiro endosso ja admite, sem
+   * passo intermediario. Quem decide quem entra sao os membros — a plataforma
+   * so opera.
    */
-  readonly recommendedEndorsements: number;
+  readonly requiredEndorsements: number;
+  /**
+   * Dias que a candidatura fica de pe sem atingir o numero. Vencido o prazo,
+   * ela caduca.
+   *
+   * Existe porque nao ha endosso contrario: sem prazo, uma candidatura que
+   * ninguem quer endossar ficaria pendente para sempre, e "pendente para
+   * sempre" e uma recusa que ninguem precisa assinar.
+   */
+  readonly applicationWindowDays: number;
 };
 
 export const DEFAULT_GOVERNANCE_POLICY: GovernancePolicy = {
-  founderCount: 6,
-  recommendedEndorsements: 2,
+  founderCount: 10,
+  requiredEndorsements: 3,
+  applicationWindowDays: 30,
 };
 
 export type EndorsementTally = {
   readonly endorsements: number;
-  readonly recommended: number;
-  readonly stillRecommended: number;
-  readonly meetsRecommendation: boolean;
+  readonly required: number;
+  readonly stillNeeded: number;
+  readonly credentialed: boolean;
   /** Fundadoras que ainda podem endossar (a padrinho nao entra na conta). */
   readonly foundersYetToEndorse: number;
 };
@@ -127,9 +136,9 @@ export function endorsementTally(
 
   return {
     endorsements,
-    recommended: policy.recommendedEndorsements,
-    stillRecommended: Math.max(0, policy.recommendedEndorsements - endorsements),
-    meetsRecommendation: endorsements >= policy.recommendedEndorsements,
+    required: policy.requiredEndorsements,
+    stillNeeded: Math.max(0, policy.requiredEndorsements - endorsements),
+    credentialed: endorsements >= policy.requiredEndorsements,
     foundersYetToEndorse: Math.max(0, elegiveis - endorsements),
   };
 }
@@ -167,9 +176,6 @@ export function openApplication(
     status: MembershipStatus.PENDING,
     endorsements: [],
     decidedAt: null,
-    decidedBy: null,
-    decisionNote: null,
-    endorsementOverride: null,
     resultingStoreId: null,
   };
 
@@ -258,130 +264,77 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
   const updated: MembershipApplication = { ...application, endorsements };
   const contagem = endorsementTally(updated, policy);
 
-  return transitioned(updated, [
+  const events: DomainEvent[] = [
     domainEvent('membership.endorsed', application.id, command.now, {
       clusterId: application.clusterId,
       founderStoreId: founderStore.id,
       updatedPreviousEndorsement: previous !== undefined,
       endorsements: contagem.endorsements,
-      stillRecommended: contagem.stillRecommended,
+      stillNeeded: contagem.stillNeeded,
     }),
-  ]);
-}
+  ];
 
-export type PlatformDecisionCommand = {
-  readonly application: MembershipApplication;
-  /** Quem decidiu, do lado da plataforma. Vai para a trilha de auditoria. */
-  readonly operator: string;
-  readonly note?: string | undefined;
-  /** Obrigatoria quando os endossos estao abaixo do recomendado. */
-  readonly endorsementOverride?: string | undefined;
-  readonly now: Instant;
-  readonly policy?: GovernancePolicy;
-};
+  if (!contagem.credentialed) return transitioned(updated, events);
 
-/** A plataforma admite a candidata. E a decisao — o endosso e insumo dela. */
-export function admitCandidate(
-  command: PlatformDecisionCommand,
-): Transition<MembershipApplication> {
-  const policy = command.policy ?? DEFAULT_GOVERNANCE_POLICY;
-  const { application, now } = command;
-
-  if (application.status !== MembershipStatus.PENDING) {
-    return err(
-      conflictError(
-        'APPLICATION_ALREADY_DECIDED',
-        `Esta candidatura ja foi ${translateStatus(application.status)}.`,
-        { applicationId: application.id, status: application.status },
-      ),
-    );
-  }
-
-  const contagem = endorsementTally(application, policy);
-  const override = command.endorsementOverride?.trim();
-
-  // Admitir abaixo do recomendado e possivel, mas nao em silencio: sem
-  // justificativa registrada, o endosso viraria enfeite.
-  if (!contagem.meetsRecommendation && (override === undefined || override.length < 10)) {
-    return err(
-      ruleViolation(
-        'ENDORSEMENT_BELOW_RECOMMENDED',
-        `A candidatura tem ${contagem.endorsements} endosso(s) e o recomendado e ` +
-          `${contagem.recommended}. Admitir assim exige justificativa registrada.`,
-        {
-          applicationId: application.id,
-          endorsements: contagem.endorsements,
-          recommended: contagem.recommended,
-        },
-      ),
-    );
-  }
-
-  const admitted: MembershipApplication = {
-    ...application,
+  // O endosso que fecha a conta ja credencia. Um passo intermediario entre a
+  // decisao e a loja operar seriam dois estados para o mesmo fato.
+  const decided: MembershipApplication = {
+    ...updated,
     status: MembershipStatus.APPROVED,
-    decidedAt: now,
-    decidedBy: command.operator,
-    decisionNote: command.note?.trim() ?? null,
-    endorsementOverride: contagem.meetsRecommendation ? null : (override ?? null),
+    decidedAt: command.now,
   };
 
-  return transitioned(admitted, [
-    domainEvent('membership.application_approved', application.id, now, {
+  events.push(
+    domainEvent('membership.application_approved', application.id, command.now, {
       clusterId: application.clusterId,
       candidateCnpj: application.candidate.cnpj,
       candidateTradeName: application.candidate.tradeName,
       endorsements: contagem.endorsements,
-      endorsedBy: application.endorsements.map((e) => e.founderStoreId),
-      decidedBy: command.operator,
-      belowRecommendation: !contagem.meetsRecommendation,
+      endorsedBy: endorsements.map((e) => e.founderStoreId),
     }),
-  ]);
+  );
+
+  return transitioned(decided, events);
 }
 
-/** A plataforma recusa. Nao ha recurso ao quorum: a decisao e dela. */
-export function rejectCandidate(
-  command: PlatformDecisionCommand,
+export type LapseApplicationCommand = {
+  readonly application: MembershipApplication;
+  readonly now: Instant;
+  readonly policy?: GovernancePolicy;
+};
+
+/**
+ * A candidatura caduca por prazo.
+ *
+ * E o unico desfecho negativo que existe, e e de proposito: sem endosso
+ * contrario, ninguem recusa candidata nenhuma. O que acontece e o silencio — e
+ * o prazo transforma o silencio em resposta, que e o minimo que se deve a quem
+ * se candidatou.
+ */
+export function lapseApplication(
+  command: LapseApplicationCommand,
 ): Transition<MembershipApplication> {
+  const policy = command.policy ?? DEFAULT_GOVERNANCE_POLICY;
   const { application, now } = command;
 
-  if (application.status !== MembershipStatus.PENDING) {
-    return err(
-      conflictError(
-        'APPLICATION_ALREADY_DECIDED',
-        `Esta candidatura ja foi ${translateStatus(application.status)}.`,
-        { applicationId: application.id, status: application.status },
-      ),
-    );
-  }
+  if (application.status !== MembershipStatus.PENDING) return unchanged(application);
 
-  const note = command.note?.trim();
-  if (note === undefined || note.length < 10) {
-    return err(
-      validationError(
-        'REJECTION_NOTE_REQUIRED',
-        'Recusar exige motivo registrado: quem apresentou a candidata precisa saber o que dizer a ela.',
-        { applicationId: application.id },
-      ),
-    );
-  }
+  const prazo = application.openedAt + policy.applicationWindowDays * DAY;
+  if (now < prazo) return unchanged(application);
 
-  const rejected: MembershipApplication = {
+  const lapsed: MembershipApplication = {
     ...application,
-    status: MembershipStatus.REJECTED,
+    status: MembershipStatus.LAPSED,
     decidedAt: now,
-    decidedBy: command.operator,
-    decisionNote: note,
-    endorsementOverride: null,
   };
 
-  return transitioned(rejected, [
-    domainEvent('membership.application_rejected', application.id, now, {
+  return transitioned(lapsed, [
+    domainEvent('membership.application_lapsed', application.id, now, {
       clusterId: application.clusterId,
-      candidateCnpj: application.candidate.cnpj,
       candidateTradeName: application.candidate.tradeName,
+      sponsorStoreId: application.sponsorStoreId,
       endorsements: application.endorsements.length,
-      decidedBy: command.operator,
+      required: policy.requiredEndorsements,
     }),
   ]);
 }
@@ -436,7 +389,7 @@ export function admitApprovedStore(
     return err(
       conflictError(
         'APPLICATION_NOT_APPROVED',
-        'So e possivel credenciar uma candidatura admitida pela plataforma.',
+        'So e possivel credenciar uma candidatura que juntou os endossos.',
         { applicationId: application.id, status: application.status },
       ),
     );
@@ -472,6 +425,8 @@ function translateStatus(status: MembershipStatus): string {
       return 'reprovada';
     case MembershipStatus.WITHDRAWN:
       return 'retirada';
+    case MembershipStatus.LAPSED:
+      return 'caducada';
     case MembershipStatus.PENDING:
       return 'aberta';
   }

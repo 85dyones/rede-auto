@@ -306,7 +306,7 @@ describe('fronteira entre pracas', () => {
     const deCuritiba = await app.context.repos.stores.founders(curitiba);
     const deLondrina = await app.context.repos.stores.founders(londrina);
 
-    assert.equal(deCuritiba.length, 6, 'as 6 fundadoras do piloto');
+    assert.equal(deCuritiba.length, 10, 'as 10 fundadoras do piloto');
     assert.equal(deLondrina.length, 1, 'Londrina constitui o proprio quorum');
 
     const emCuritiba = new Set(deCuritiba.map((loja) => loja.id));

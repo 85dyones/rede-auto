@@ -379,14 +379,11 @@ export function applicationDto(application: MembershipApplication, tally: Endors
     situacao: application.status,
     abertaEm: instant(application.openedAt),
     decididaEm: instant(application.decidedAt),
-    decididaPor: application.decidedBy,
-    observacaoDaDecisao: application.decisionNote,
-    justificativaDeExcecao: application.endorsementOverride,
     apuracao: {
       endossos: tally.endorsements,
-      recomendado: tally.recommended,
-      faltamParaORecomendado: tally.stillRecommended,
-      atingeORecomendado: tally.meetsRecommendation,
+      necessarios: tally.required,
+      faltam: tally.stillNeeded,
+      credenciada: tally.credentialed,
       fundadorasQuePodemEndossar: tally.foundersYetToEndorse,
     },
     endossos: application.endorsements.map((e) => ({

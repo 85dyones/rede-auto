@@ -5,11 +5,10 @@ import {
   DEFAULT_GOVERNANCE_POLICY,
   MembershipStatus,
   admitApprovedStore,
-  admitCandidate,
   endorse,
   endorsementTally,
+  lapseApplication,
   openApplication,
-  rejectCandidate,
   withdrawApplication,
   type MembershipApplication,
 } from './membership.ts';
@@ -53,32 +52,34 @@ function endorsedBy(
   return current;
 }
 
-const OPERADOR = 'Operacao rede-auto';
-
-/** Caminho feliz completo: dois endossos e a plataforma admite. */
+/** Caminho feliz: tres endossos credenciam na hora. */
 function admitida(): MembershipApplication {
-  const comEndossos = endorsedBy(pendingApplication(), [1, 2]);
-  return unwrap(admitCandidate({ application: comEndossos, operator: OPERADOR, now: NOW })).state;
+  return endorsedBy(pendingApplication(), [1, 2, 3]);
 }
 
-describe('endosso: sinal de qualidade, nao voto', () => {
-  test('endossar NAO credencia — a candidatura segue pendente', () => {
-    // E a diferenca inteira entre endosso e quorum. Se tres endossos
-    // credenciassem sozinhos, as fundadoras voltariam a ter poder de veto pela
-    // porta dos fundos: bastaria nao endossar ninguem.
-    const comTodos = endorsedBy(pendingApplication(), [1, 2, 3, 4, 5]);
+describe('endosso: quem decide quem entra sao os membros', () => {
+  test('o terceiro endosso ja credencia, sem passo intermediario', () => {
+    const decidida = admitida();
 
-    assert.equal(comTodos.status, MembershipStatus.PENDING);
-    assert.equal(comTodos.endorsements.length, 5);
-    assert.equal(comTodos.decidedAt, null);
+    assert.equal(decidida.status, MembershipStatus.APPROVED);
+    assert.equal(decidida.decidedAt, NOW);
+    assert.equal(decidida.endorsements.length, 3);
+  });
+
+  test('dois endossos ainda nao credenciam', () => {
+    const parcial = endorsedBy(pendingApplication(), [1, 2]);
+
+    assert.equal(parcial.status, MembershipStatus.PENDING);
+    assert.equal(endorsementTally(parcial).stillNeeded, 1);
   });
 
   test('nao existe endosso contrario', () => {
-    // Quem tem restricao simplesmente nao endossa. Modelar rejeicao devolveria
-    // o veto — por isso `endorse` nao tem parametro de decisao.
+    // Quem tem restricao simplesmente nao endossa. Modelar rejeicao daria a
+    // cada fundadora um veto individual sobre concorrencia direta — por isso
+    // `endorse` nao tem parametro de decisao e nao ha como escrever "sou contra".
     const tally = endorsementTally(pendingApplication());
     assert.equal(tally.endorsements, 0);
-    assert.equal(tally.meetsRecommendation, false);
+    assert.equal(tally.credentialed, false);
   });
 
   test('a padrinho nao endossa a propria indicacao', () => {
@@ -94,6 +95,7 @@ describe('endosso: sinal de qualidade, nao voto', () => {
   });
 
   test('endossar de novo atualiza a nota em vez de somar', () => {
+    // Sem isto, uma fundadora credenciaria sozinha endossando tres vezes.
     const uma = endorsedBy(pendingApplication(), [1]);
     const denovo = unwrap(
       endorse({
@@ -106,6 +108,7 @@ describe('endosso: sinal de qualidade, nao voto', () => {
     ).state;
 
     assert.equal(denovo.endorsements.length, 1, 'continua sendo uma fundadora');
+    assert.equal(denovo.status, MembershipStatus.PENDING);
     assert.equal(denovo.endorsements[0]?.note, 'Conversei com o titular; segue valendo.');
   });
 
@@ -136,96 +139,49 @@ describe('endosso: sinal de qualidade, nao voto', () => {
   });
 
   test('a apuracao tira a padrinho do denominador', () => {
-    // Ela nao pode endossar, entao contar com ela deixaria o numero sempre
-    // inalcancavel por um.
     const tally = endorsementTally(pendingApplication());
     assert.equal(tally.foundersYetToEndorse, DEFAULT_GOVERNANCE_POLICY.founderCount - 1);
   });
+
+  test('candidatura credenciada nao aceita novo endosso', () => {
+    const tardio = endorse({
+      application: admitida(),
+      founderStore: network.founderAt(4),
+      user: network.principalAt(4),
+      now: NOW,
+    });
+
+    assert.equal(tardio.ok === false && tardio.error.code, 'APPLICATION_ALREADY_DECIDED');
+  });
 });
 
-describe('a decisao e da plataforma', () => {
-  test('com o endosso recomendado, a plataforma admite', () => {
-    const decidida = admitida();
+describe('caducidade: o silencio ganha data', () => {
+  const JANELA = DEFAULT_GOVERNANCE_POLICY.applicationWindowDays * 24 * 60 * 60 * 1000;
 
-    assert.equal(decidida.status, MembershipStatus.APPROVED);
-    assert.equal(decidida.decidedBy, OPERADOR);
-    assert.equal(decidida.endorsementOverride, null, 'nao houve excecao');
+  test('dentro do prazo, a candidatura continua de pe', () => {
+    const transicao = unwrap(
+      lapseApplication({ application: pendingApplication(), now: NOW + JANELA - 1 }),
+    );
+
+    assert.equal(transicao.state.status, MembershipStatus.PENDING);
+    assert.equal(transicao.events.length, 0);
   });
 
-  test('abaixo do recomendado exige justificativa registrada', () => {
-    // A plataforma PODE admitir sem endosso — mas nao em silencio. Sem isso o
-    // endosso viraria enfeite.
-    const semEndosso = pendingApplication();
-    const result = admitCandidate({ application: semEndosso, operator: OPERADOR, now: NOW });
-
-    assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.error.code, 'ENDORSEMENT_BELOW_RECOMMENDED');
-  });
-
-  test('a excecao fica registrada na candidatura', () => {
-    const justificativa = 'Loja do mesmo grupo de uma fundadora; operacao ja conhecida.';
-    const decidida = unwrap(
-      admitCandidate({
-        application: pendingApplication(),
-        operator: OPERADOR,
-        endorsementOverride: justificativa,
-        now: NOW,
-      }),
+  test('vencido o prazo sem os endossos, caduca', () => {
+    // E o unico desfecho negativo que existe, e de proposito: ninguem recusa
+    // ninguem. O prazo transforma o silencio em resposta.
+    const caducada = unwrap(
+      lapseApplication({ application: endorsedBy(pendingApplication(), [1]), now: NOW + JANELA }),
     ).state;
 
-    assert.equal(decidida.status, MembershipStatus.APPROVED);
-    assert.equal(decidida.endorsementOverride, justificativa);
+    assert.equal(caducada.status, MembershipStatus.LAPSED);
+    assert.equal(caducada.decidedAt, NOW + JANELA);
   });
 
-  test('recusar exige motivo: quem indicou precisa saber o que dizer', () => {
-    const semMotivo = rejectCandidate({
-      application: endorsedBy(pendingApplication(), [1, 2]),
-      operator: OPERADOR,
-      now: NOW,
-    });
-    assert.equal(semMotivo.ok, false);
-    assert.equal(semMotivo.ok === false && semMotivo.error.code, 'REJECTION_NOTE_REQUIRED');
-
-    const comMotivo = unwrap(
-      rejectCandidate({
-        application: endorsedBy(pendingApplication(), [1, 2]),
-        operator: OPERADOR,
-        note: 'Pendencia cadastral no CNPJ da candidata.',
-        now: NOW,
-      }),
-    ).state;
-    assert.equal(comMotivo.status, MembershipStatus.REJECTED);
-    assert.equal(comMotivo.decisionNote, 'Pendencia cadastral no CNPJ da candidata.');
-  });
-
-  test('a plataforma pode recusar candidata com endosso de todas', () => {
-    // O endosso informa; nao obriga.
-    const todas = endorsedBy(pendingApplication(), [1, 2, 3, 4, 5]);
-    const recusada = unwrap(
-      rejectCandidate({
-        application: todas,
-        operator: OPERADOR,
-        note: 'Restricao documental que as fundadoras nao tinham como ver.',
-        now: NOW,
-      }),
-    ).state;
-
-    assert.equal(recusada.status, MembershipStatus.REJECTED);
-  });
-
-  test('candidatura ja decidida nao aceita novo endosso nem nova decisao', () => {
-    const decidida = admitida();
-
-    const tardio = endorse({
-      application: decidida,
-      founderStore: network.founderAt(3),
-      user: network.principalAt(3),
-      now: NOW,
-    });
-    assert.equal(tardio.ok === false && tardio.error.code, 'APPLICATION_ALREADY_DECIDED');
-
-    const denovo = admitCandidate({ application: decidida, operator: OPERADOR, now: NOW });
-    assert.equal(denovo.ok === false && denovo.error.code, 'APPLICATION_ALREADY_DECIDED');
+  test('candidatura ja credenciada nao caduca', () => {
+    const transicao = unwrap(lapseApplication({ application: admitida(), now: NOW + JANELA * 10 }));
+    assert.equal(transicao.state.status, MembershipStatus.APPROVED);
+    assert.equal(transicao.events.length, 0);
   });
 });
 

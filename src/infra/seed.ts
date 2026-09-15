@@ -61,6 +61,10 @@ const FOUNDERS = [
   { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Colombo', state: 'PR', cnpj: '33000167000101', tradeInDefault: TradeInStance.CONSIDERS },
   { slug: 'sul', tradeName: 'Sul Car', city: 'Araucaria', state: 'PR', cnpj: '60746948000112', tradeInDefault: TradeInStance.CASH_ONLY },
   { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Pinhais', state: 'PR', cnpj: '47960950000121', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'planalto', tradeName: 'Planalto Veiculos', city: 'Campo Largo', state: 'PR', cnpj: '19283746000188', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'atlas', tradeName: 'Atlas Automoveis', city: 'Curitiba', state: 'PR', cnpj: '28574639000108', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'iguacu', tradeName: 'Iguacu Motors', city: 'Piraquara', state: 'PR', cnpj: '37615284000130', tradeInDefault: TradeInStance.CASH_ONLY },
+  { slug: 'bandeirante', tradeName: 'Bandeirante Seminovos', city: 'Fazenda Rio Grande', state: 'PR', cnpj: '41962853000191', tradeInDefault: TradeInStance.CONSIDERS },
 ] as const;
 
 const DEMO_VEHICLES = [
@@ -195,7 +199,7 @@ export async function seedFoundingNetwork(
         cnpj: founder.cnpj,
         city: founder.city,
         state: founder.state,
-        phone: `41${3200 + index}4455`,
+        phone: `4132${String(index).padStart(2, '0')}4455`,
         email: `contato@${founder.slug}.com.br`,
         responsibleName: `Titular ${founder.tradeName}`,
       },

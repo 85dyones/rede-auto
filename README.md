@@ -223,22 +223,30 @@ conversa sobre quem paga o quê.
 E o livro de custódia responde à pergunta que uma multa faz: **quem estava com o
 carro em 12/03 às 14h32?**
 
-### 4. Governança: fundadoras endossam, a plataforma decide
+### 4. Governança: quem decide quem entra são os membros
 
 A rede é fechada, e a qualificação vem do **endosso**: uma fundadora coloca a
-reputação dela atrás de uma candidata que conhece de praça. Mas endosso não é
-voto — quem admite é a plataforma.
-
-A diferença não é burocrática, é de incentivo. Enquanto o credenciamento era
-decidido por quórum, as fundadoras tinham nas mãos o poder de barrar
-concorrência direta e chamar isso de critério. Tirar a decisão delas remove o
-conflito sem jogar fora o que elas sabem.
+reputação dela atrás de uma candidata que conhece de praça. **Três endossos
+credenciam**, entre as 10 fundadoras. A plataforma só opera — não vota, não veta,
+não admite.
 
 **Não existe endosso contrário.** Quem tem restrição simplesmente não endossa, e
-a ausência já é o sinal. A plataforma pode admitir abaixo do endosso recomendado,
-mas precisa registrar a justificativa — é o que impede o endosso de virar enfeite
-sem transformá-lo em veto. A padrinho não endossa a própria indicação, e quem
-entra depois não vira fundadora.
+a ausência já é o sinal. Modelar rejeição daria a cada fundadora um veto
+individual sobre concorrência direta, que é exatamente o que não se quer.
+
+Como não há recusa, existe **prazo**: a candidatura caduca se não juntar os
+endossos em 30 dias. Sem isso, "pendente para sempre" seria uma recusa que
+ninguém precisa assinar — e a candidata nunca saberia o que aconteceu.
+
+O terceiro endosso já credencia: não há passo entre a decisão e a loja poder
+operar. A padrinho não endossa a própria indicação, e quem entra depois não vira
+fundadora.
+
+> **Limite conhecido.** Endossos numa praça de 60 km não são independentes — as
+> fundadoras se conhecem e compram nos mesmos leilões. Três endossos medem
+> reputação no mercado, não saúde financeira. O contrapeso não está aqui: está na
+> exposição graduada de quem acaba de entrar e no registro de conduta entre
+> lojas.
 
 ## Material de divulgação
 

@@ -9,15 +9,13 @@ import {
   retireApplication,
   submitApplication,
   viewApplication,
-  admitApplication,
   endorseApplication,
-  rejectApplication,
 } from '../../application/governance-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
 import { applicationDto, clusterDto, storeDto } from '../serialize.ts';
-import { asObject, optionalText, text } from '../parse.ts';
-import { requireActor, requireOperator } from './support.ts';
+import { asObject, optionalText } from '../parse.ts';
+import { requireActor } from './support.ts';
 
 export function registerNetworkRoutes(router: Router, context: AppContext): void {
   /** As lojas da **sua** praca. Nao existe "todas as lojas da instalacao". */
@@ -54,7 +52,7 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     const founders = await context.repos.stores.founders(actor.value.store.clusterId);
     return json(200, {
       total: founders.length,
-      endossosRecomendados: context.policies.governance.recommendedEndorsements,
+      endossosParaCredenciar: context.policies.governance.requiredEndorsements,
       lojas: founders.map(storeDto),
     });
   });
@@ -92,9 +90,8 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
   });
 
   /**
-   * Endosso de fundadora. NAO credencia — a candidatura segue pendente ate a
-   * plataforma decidir. Endosso e a palavra de quem conhece a candidata; a
-   * admissao e decisao de quem opera a rede.
+   * Endosso de fundadora. O terceiro endosso ja credencia — quem decide quem
+   * entra sao os membros, e a plataforma so opera.
    */
   router.post('/api/v1/credenciamentos/:id/endossos', async (request) => {
     const actor = requireActor(request);
@@ -111,50 +108,39 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
-    return json(200, applicationDto(result.value.application, result.value.tally, null));
-  });
-
-  /** A plataforma admite. Abaixo do endosso recomendado exige justificativa. */
-  router.post('/api/v1/credenciamentos/:id/admissao', async (request) => {
-    const operator = requireOperator(request);
-    if (!operator.ok) return errorResponse(operator.error, request.requestId);
-
-    const body = asObject(request.body);
-    if (!body.ok) return errorResponse(body.error, request.requestId);
-
-    const note = optionalText(body.value, 'observacao');
-    const override = optionalText(body.value, 'justificativaDeExcecao');
-
-    const result = await admitApplication(
-      context,
-      operator.value.name,
-      asApplicationId(request.params['id'] as string),
-      {
-        ...(note === undefined ? {} : { note }),
-        ...(override === undefined ? {} : { endorsementOverride: override }),
-      },
-    );
-    if (!result.ok) return errorResponse(result.error, request.requestId);
-
     return json(200, applicationDto(result.value.application, result.value.tally, result.value.admittedStore));
   });
 
-  /** A plataforma recusa. Motivo obrigatorio: quem indicou precisa saber. */
-  router.post('/api/v1/credenciamentos/:id/recusa', async (request) => {
-    const operator = requireOperator(request);
-    if (!operator.ok) return errorResponse(operator.error, request.requestId);
+  router.get('/api/v1/credenciamentos', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const pending = await context.repos.memberships.pending(actor.value.store.clusterId);
+    const views = [];
+    for (const application of pending) {
+      const view = await viewApplication(context, application.id);
+      if (view.ok) views.push(applicationDto(view.value.application, view.value.tally, null));
+    }
+    return json(200, { total: views.length, candidaturas: views });
+  });
+
+  /**
+   * Endosso de fundadora. NAO credencia — a candidatura segue pendente ate a
+   * plataforma decidir. Endosso e a palavra de quem conhece a candidata; a
+   * admissao e decisao de quem opera a rede.
+   */
+  router.post('/api/v1/credenciamentos/:id/endossos', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     const body = asObject(request.body);
     if (!body.ok) return errorResponse(body.error, request.requestId);
 
-    const motivo = text(body.value, 'motivo', { min: 10, max: 500 });
-    if (!motivo.ok) return errorResponse(motivo.error, request.requestId);
-
-    const result = await rejectApplication(
+    const result = await endorseApplication(
       context,
-      operator.value.name,
+      actor.value,
       asApplicationId(request.params['id'] as string),
-      motivo.value,
+      optionalText(body.value, 'justificativa'),
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
 

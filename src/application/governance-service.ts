@@ -15,14 +15,13 @@ import { asApplicationId, asStoreId, type ApplicationId } from '../domain/shared
 import { domainEvent } from '../domain/shared/events.ts';
 import { type Store, parseStoreProfile } from '../domain/network/store.ts';
 import {
+  MembershipStatus,
   type EndorsementTally,
   type MembershipApplication,
   admitApprovedStore,
-  admitCandidate,
   endorse,
   endorsementTally,
   openApplication,
-  rejectCandidate,
   withdrawApplication,
 } from '../domain/network/membership.ts';
 import { type Actor, type AppContext, publish } from './context.ts';
@@ -88,86 +87,19 @@ export async function endorseApplication(
   });
   if (!transition.ok) return transition;
 
-  const updated = transition.value.state;
-  await context.repos.memberships.save(updated);
-  await publish(context, transition.value.events, actor);
-
-  // Endossar nao credencia ninguem: a candidatura segue PENDING ate a
-  // plataforma decidir. E a diferenca entre endosso e voto.
-  return ok({
-    application: updated,
-    tally: endorsementTally(updated, context.policies.governance),
-    admittedStore: null,
-  });
-}
-
-/**
- * A plataforma admite a candidata — e a admissao ja cria a loja.
- *
- * Nao ha passo manual entre decidir e a loja poder operar: seriam dois estados
- * para o mesmo fato, e o segundo so existiria para alguem esquecer dele.
- */
-export async function admitApplication(
-  context: AppContext,
-  operator: string,
-  applicationId: ApplicationId,
-  options: { note?: string; endorsementOverride?: string } = {},
-): Promise<Result<ApplicationView, DomainError>> {
-  const application = await context.repos.memberships.byId(applicationId);
-  if (application === undefined) return err(applicationNotFound(applicationId));
-
-  const transition = admitCandidate({
-    application,
-    operator,
-    ...(options.note === undefined ? {} : { note: options.note }),
-    ...(options.endorsementOverride === undefined
-      ? {}
-      : { endorsementOverride: options.endorsementOverride }),
-    now: context.clock.now(),
-    policy: context.policies.governance,
-  });
-  if (!transition.ok) return transition;
-
   const decided = transition.value.state;
   await context.repos.memberships.save(decided);
-  await publish(context, transition.value.events);
+  await publish(context, transition.value.events, actor);
 
-  const admitted = await admit(context, decided);
+  // O endosso que fecha a conta ja credencia: nao ha passo manual entre a
+  // decisao dos membros e a loja poder operar.
+  const admitted =
+    decided.status === MembershipStatus.APPROVED ? await admit(context, decided) : null;
 
   return ok({
     application: admitted?.application ?? decided,
     tally: endorsementTally(decided, context.policies.governance),
     admittedStore: admitted?.store ?? null,
-  });
-}
-
-/** A plataforma recusa. Exige motivo: quem indicou precisa saber o que dizer. */
-export async function rejectApplication(
-  context: AppContext,
-  operator: string,
-  applicationId: ApplicationId,
-  note: string,
-): Promise<Result<ApplicationView, DomainError>> {
-  const application = await context.repos.memberships.byId(applicationId);
-  if (application === undefined) return err(applicationNotFound(applicationId));
-
-  const transition = rejectCandidate({
-    application,
-    operator,
-    note,
-    now: context.clock.now(),
-    policy: context.policies.governance,
-  });
-  if (!transition.ok) return transition;
-
-  const decided = transition.value.state;
-  await context.repos.memberships.save(decided);
-  await publish(context, transition.value.events);
-
-  return ok({
-    application: decided,
-    tally: endorsementTally(decided, context.policies.governance),
-    admittedStore: null,
   });
 }
 
