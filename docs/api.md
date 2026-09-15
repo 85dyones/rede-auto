@@ -16,7 +16,7 @@ usuário)** — o papel do usuário decide o que ele pode fazer.
 plataforma, e não há superfície voltada a ele.
 
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
-> [`decisoes.md`](decisoes.md#27-o-que-ficou-de-fora-e-por-quê).
+> [`decisoes.md`](decisoes.md#30-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
@@ -213,6 +213,63 @@ credenciaria sozinha endossando três vezes.
 Retira a candidatura. Só a padrinho pode.
 
 ---
+
+## Conduta e desligamento
+
+### `GET /api/v1/conduta`
+
+O registro de conduta dos pátios da **sua** empresa. O registro alheio aparece só
+no fundamento de uma moção de desligamento — que já é um ato público de
+governança.
+
+```jsonc
+{
+  "patios": [{
+    "quebrasNaJanela": 1,
+    "limite": 3,
+    "atingiuOLimite": false,
+    "janelaAliviaEm": "2027-03-12T…",
+    "suspensoesPorConduta": 0,
+    "quebras": [{
+      "especie": "DROPOFF_NOT_ACKNOWLEDGED",
+      "descricao": "nao deu aceite em entrega declarada no patio",
+      "minutosDeAtraso": 1200
+    }]
+  }]
+}
+```
+
+`janelaAliviaEm` é a informação que falta para a suspensão fazer sentido: sem
+ela, o lojista vê "3 de 3" e não sabe que a contagem anda sozinha para trás.
+
+As quatro espécies de quebra e o que ficou de fora estão em
+[`decisoes.md`](decisoes.md#28-quebra-de-protocolo-o-que-conta-o-que-não-conta-e-por-quê).
+
+### `POST /api/v1/desligamentos`
+
+Abre moção contra uma empresa. Corpo: `{ "empresaId": "mbr_…" }`.
+
+O fundamento é **apurado do registro**, não informado por quem abre. Sem
+reincidência registrada — uma segunda suspensão por conduta — a moção é recusada
+com `422 NO_RECIDIVISM_ON_RECORD`. É a guarda que impede o desligamento de virar
+o veto que a admissão recusou.
+
+Só o **titular** de uma empresa fundadora em dia abre. Vendedor recebe `403`
+antes de qualquer apuração: ele não chega a saber se a concorrente tem registro.
+
+### `POST /api/v1/desligamentos/:id/apoios`
+
+```jsonc
+{ "justificativa": "Terceira entrega sem aceite em seis meses." }
+```
+
+Não há corpo de decisão: **não existe voto contra**. O silêncio já é contra, e
+registrar "sou contra" tornaria visível quem defendeu quem.
+
+Carrega com dois terços das fundadoras ativas, excluída a acusada, piso de duas.
+O apoio que fecha o quórum **já desliga** — a resposta traz `empresaDesligada`
+preenchida. A moção caduca em 21 dias sem quórum, e o desfecho por inércia é
+*fica*.
 
 ## Financeiro
 

@@ -22,6 +22,11 @@ import {
 import { MINUTE } from './domain/shared/clock.ts';
 import { DEFAULT_BILLING_POLICY, type BillingPolicy } from './domain/billing/charge.ts';
 import { DEFAULT_TARIFF_TABLES, type TariffTable } from './domain/billing/tariff.ts';
+import { DEFAULT_CONDUCT_POLICY, type ConductPolicy } from './domain/conduct/breach.ts';
+import {
+  DEFAULT_EXPULSION_POLICY,
+  type ExpulsionPolicy,
+} from './domain/network/expulsion.ts';
 
 export type NetworkPolicies = {
   readonly governance: GovernancePolicy;
@@ -29,6 +34,8 @@ export type NetworkPolicies = {
   readonly recall: RecallPolicy;
   readonly custody: CustodyPolicy;
   readonly billing: BillingPolicy;
+  readonly conduct: ConductPolicy;
+  readonly expulsion: ExpulsionPolicy;
   /**
    * Tabelas de preco, todas as versoes. Uma lista, e nao a vigente, porque a
    * fundadora fica na que assinou por 24 meses — a versao antiga precisa
@@ -67,6 +74,8 @@ export function defaultPolicies(referenceYear?: number): NetworkPolicies {
   return {
     governance: DEFAULT_GOVERNANCE_POLICY,
     billing: DEFAULT_BILLING_POLICY,
+    conduct: DEFAULT_CONDUCT_POLICY,
+    expulsion: DEFAULT_EXPULSION_POLICY,
     tariffs: DEFAULT_TARIFF_TABLES,
     lock: DEFAULT_LOCK_POLICY,
     recall: {

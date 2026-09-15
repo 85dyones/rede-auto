@@ -34,6 +34,8 @@ import { type DomainEvent, domainEvent } from '../shared/events.ts';
 import { type Transition, transitioned } from '../shared/transition.ts';
 import type { Instant } from '../shared/clock.ts';
 import type { CustodyTransferId, RecallId, StoreId, UserId } from '../shared/ids.ts';
+import { YARD_RADIUS_METERS, distanceMeters } from '../shared/geo.ts';
+import type { Store } from '../network/store.ts';
 import {
   parseCpf,
   parseFuelEighths,
@@ -610,6 +612,12 @@ export type DeclareDropOffCommand = {
   readonly actorStoreId: StoreId;
   readonly actorUserId: UserId;
   readonly geolocation: { readonly lat: number; readonly lng: number };
+  /**
+   * A loja de DESTINO. Parametro obrigatorio porque e a coordenada do patio
+   * dela que faz a geolocalizacao significar alguma coisa — sem ela, a
+   * declaracao provava *uma* posicao, nao *a* posicao.
+   */
+  readonly destination: Store;
   readonly note?: string | null;
   readonly now: Instant;
 };
@@ -652,6 +660,29 @@ export function declareDropOff(command: DeclareDropOffCommand): Transition<Vehic
         'DROP_OFF_GEOLOCATION_REQUIRED',
         'A entrega precisa de geolocalizacao: sem coordenada, "deixei no patio" nao e registro.',
         { transferId: transfer.id },
+      ),
+    );
+  }
+
+  // A coordenada e conferida contra o patio de destino. Recusar aqui e melhor
+  // que registrar a falha depois: impede o erro em vez de puni-lo, e devolve a
+  // distancia para quem esta com o celular na mao resolver na hora.
+  //
+  // O raio e generoso (500 m) justamente para que erro de GPS em rua de centro
+  // nao vire acusacao. O que isto elimina e a declaracao feita de qualquer
+  // lugar — que era o unico caso real.
+  const metros = distanceMeters(geo, command.destination.profile.yard);
+  if (metros > YARD_RADIUS_METERS) {
+    return err(
+      ruleViolation(
+        'DROP_OFF_AWAY_FROM_YARD',
+        `A coordenada informada esta a ${Math.round(metros)} m do patio de destino. ` +
+          'Declare a entrega no patio: e a coordenada que faz o registro valer.',
+        {
+          transferId: transfer.id,
+          distanceMeters: Math.round(metros),
+          toleranceMeters: YARD_RADIUS_METERS,
+        },
       ),
     );
   }

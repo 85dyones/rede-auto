@@ -24,7 +24,7 @@ se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 475 testes
+npm run check    # typecheck estrito + 531 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -130,7 +130,7 @@ O carro de troca tem dois destinos:
   A antes do fechamento**: sem isso, a Loja B daria um valor ao cliente sem
   saber se alguém o honra.
 
-## As seis regras que sustentam a rede
+## As oito regras que sustentam a rede
 
 ### 1. Trava comercial com prazo de 4 horas
 
@@ -343,6 +343,96 @@ primeira loja — filial compartilha a raiz. Isso faz "essa loja é da mesma
 empresa?" ser pergunta verificável em vez de declaração em que se acredita, e é
 o que impede `POST /api/v1/lojas` de virar a porta dos fundos para credenciar
 uma empresa inteira pelo preço de uma filial.
+
+### 7. Conduta: as quebras que o sistema mede sozinho
+
+"Quebrar o protocolo três vezes suspende" só vira regra se **quebra** for algo
+que o sistema mede sem ninguém opinar. Julgamento humano sobre quem falhou seria
+um tribunal entre concorrentes — exatamente o que esta rede não pode ter. Então
+toda quebra atende três critérios: **objetiva** (sai de um prazo vencido ou de
+um carimbo que faltou), **atribuível** (sobra para uma loja só) e **já medida**
+(o sistema conhece o fato antes de alguém reclamar).
+
+São quatro:
+
+| Quebra | De quem | Sai de |
+|---|---|---|
+| Não devolveu no prazo do recall | custodiante | SLA de 4h úteis vencido |
+| Não retirou o carro disponibilizado | quem pediu o recall | escape operacional sem retirada |
+| Não deu aceite em entrega declarada no pátio | quem recebe | entrega com coordenada conferida |
+| Deixou o carro em trânsito sem entregar nem cancelar | loja de origem | termo aberto além do plausível |
+
+**A geolocalização da entrega passou a ser conferida.** Ela já era obrigatória,
+mas não havia com o que compará-la: provava *uma* posição, não *a* posição — um
+número que ninguém confere é decoração, não registro. Agora cada loja tem a
+coordenada do pátio (`StoreProfile.yard`), e a declaração feita fora de um raio
+de 500 m é **recusada na hora**, com a distância no erro. Isso impede o engano em
+vez de puni-lo, e é o que torna "não deu aceite" atribuível: sem a conferência,
+"declarei que deixei" contra "não chegou" seria palavra contra palavra.
+
+O raio é generoso de propósito. GPS de celular em rua de centro erra mais de cem
+metros; um raio apertado transformaria falha de sinal em acusação de declaração
+falsa. O que 500 m elimina é a declaração feita de qualquer lugar — que era o
+caso real.
+
+**A janela é móvel, de 12 meses.** Uma quebra por ano durante três anos é um
+problema diferente de três quebras num mês, e só a janela móvel separa os dois:
+com contagem vitalícia, toda loja antiga viraria candidata a suspensão por
+acúmulo lento. E o pátio **reabre sozinho** quando a janela alivia — punição que
+depende de alguém lembrar de tirar vira permanente.
+
+Três quebras suspendem o **pátio**, não a empresa: quem quebrou o protocolo foi
+aquele pátio, e derrubar a matriz porque a filial atrasou três entregas puniria
+quem não fez nada. Inadimplência é o caso oposto, e por isso os dois status
+existem separados.
+
+> **Fora do registro de conduta, de propósito.** Divergência de vistoria
+> (odômetro além da tolerância, combustível a menos, avaria nova) **não** é
+> quebra de protocolo — é dano, e o produto deliberadamente não arbitra dano.
+> Contá-la como quebra transformaria o registro objetivo numa acusação
+> automática, e a primeira loja a marcar um risco no termo aprenderia a não
+> marcar mais. Declaração de entrega feita longe do pátio também não entra: ela é
+> recusada na hora, e ato recusado não causou dano — registrar tentativa recusada
+> puniria falha de GPS, que é indistinguível de má-fé com os dados que existem.
+
+### 8. Desligamento: entrar é discricionário, sair é probatório
+
+Essa assimetria é o desenho inteiro.
+
+**Entrar** é discricionário: a fundadora endossa porque conhece a candidata e não
+precisa provar nada. Por isso não existe endosso contrário — dar a cada fundadora
+um veto individual sobre concorrência direta seria o abuso óbvio.
+
+**Sair** é probatório: uma moção de desligamento só pode ser aberta contra quem
+**já tem o registro medido** — reincidência em quebra de protocolo, isto é, uma
+segunda suspensão por conduta. Sem essa exigência, o desligamento viraria o veto
+que a admissão recusou, com a agravante de servir para remover quem está vendendo
+bem. A opinião decide quem entra; o registro decide quem *pode* ser posto para
+fora.
+
+O fundamento é **apurado do registro**, não informado por quem abre: deixar a
+proponente declarar a reincidência transformaria a guarda em formalidade — quem
+quer desligar um concorrente também sabe digitar "2". E ele é **copiado na
+abertura**, porque a janela móvel alivia com o tempo e a moção não pode perder o
+chão no meio da votação porque o calendário andou.
+
+Duas coisas seguem o formato da admissão, pelos mesmos motivos: **não há voto
+contra** (o silêncio já é contra, e registrar "sou contra" tornaria visível quem
+defendeu quem, que é como se constrói retaliação) e **há prazo** — moção que não
+junta apoio caduca, e o desfecho por inércia é *fica*. Se "sai" fosse o default
+do silêncio, bastaria abrir moções e esperar.
+
+O quórum, ao contrário dos três endossos, é **proporcional**: dois terços das
+fundadoras ativas, excluída a acusada, com piso de duas. Não é incoerência — na
+admissão o que se mede é confiança, e três lojas respondendo por uma quarta é uma
+unidade que não encolhe porque a praça é pequena; aqui o que se mede é consenso
+da rede sobre expulsar alguém, e consenso é proporção por definição.
+
+O desligamento **não espera a custódia se resolver, e não é bloqueado por ela**:
+se estar com o carro de um parceiro adiasse a saída, bastaria segurar um carro
+para nunca ser desligado — o refém viraria escudo. As obrigações sobrevivem, e a
+lista de carros ainda em poder da empresa desligada vai no evento, para cada dona
+saber no mesmo instante o que precisa chamar de volta.
 
 ## Material de divulgação
 

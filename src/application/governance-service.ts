@@ -14,19 +14,34 @@
 
 import { type Result, err, ok } from '../domain/shared/result.ts';
 import type { DomainError } from '../domain/shared/errors.ts';
-import { conflictError, forbiddenError } from '../domain/shared/errors.ts';
+import { conflictError, forbiddenError, notFoundError, ruleViolation } from '../domain/shared/errors.ts';
 import {
   asApplicationId,
   asMemberId,
+  asMotionId,
   asStoreId,
   type ApplicationId,
   type ClusterId,
+  type MemberId,
+  type MotionId,
 } from '../domain/shared/ids.ts';
 import { domainEvent } from '../domain/shared/events.ts';
 import { type Store, UserRole, parseStoreProfile } from '../domain/network/store.ts';
 import { type Member, cnpjRootOf } from '../domain/network/member.ts';
 import { tariffInEffect } from '../domain/billing/tariff.ts';
 import { chargeAdhesion } from './billing-service.ts';
+import { memberConduct } from './conduct-service.ts';
+import {
+  type ExpulsionMotion,
+  type SupportTally,
+  MotionStatus,
+  executeExpulsion,
+  expulsionEvents,
+  lapseMotion,
+  openExpulsionMotion,
+  supportExpulsion,
+  supportTally,
+} from '../domain/network/expulsion.ts';
 import {
   MembershipStatus,
   type EndorsementTally,
@@ -341,4 +356,193 @@ export async function openStoreBranch(
   );
 
   return ok({ store: branch.value, storeCount: stores.length });
+}
+
+// ---------------------------------------------------------------------------
+// Desligamento
+// ---------------------------------------------------------------------------
+
+export type MotionView = {
+  readonly motion: ExpulsionMotion;
+  readonly tally: SupportTally;
+  readonly expelled: Member | null;
+};
+
+async function motionView(
+  context: AppContext,
+  motion: ExpulsionMotion,
+  expelled: Member | null = null,
+): Promise<MotionView> {
+  return {
+    motion,
+    tally: supportTally(
+      motion,
+      await founderRoll(context, motion.clusterId),
+      context.policies.expulsion,
+    ),
+    expelled,
+  };
+}
+
+/**
+ * Abre mocao de desligamento contra uma empresa reincidente.
+ *
+ * O fundamento e apurado AQUI, do registro de conduta, e nao informado por quem
+ * abre. Deixar a proponente declarar a reincidencia transformaria a guarda numa
+ * formalidade: quem quer desligar um concorrente tambem sabe digitar "2".
+ */
+export async function openExpulsion(
+  context: AppContext,
+  actor: Actor,
+  accusedMemberId: MemberId,
+): Promise<Result<MotionView, DomainError>> {
+  const accused = await context.repos.members.byId(accusedMemberId);
+  if (accused === undefined || accused.clusterId !== actor.member.clusterId) {
+    return err(
+      notFoundError('MEMBER_NOT_FOUND', 'Empresa nao encontrada nesta praca.', {
+        memberId: accusedMemberId,
+      }),
+    );
+  }
+
+  // O pior patio da empresa e o que fundamenta: a reincidencia e do grupo, e
+  // basta um patio reincidente para a rede ter o que julgar.
+  const condutas = await memberConduct(context, accusedMemberId);
+  const pior = condutas.reduce<(typeof condutas)[number] | undefined>(
+    (worst, view) =>
+      worst === undefined || view.conductSuspensions > worst.conductSuspensions ? view : worst,
+    undefined,
+  );
+  if (pior === undefined) {
+    return err(
+      ruleViolation(
+        'NO_RECIDIVISM_ON_RECORD',
+        'Esta empresa nao tem patio com registro de conduta.',
+        { memberId: accusedMemberId },
+      ),
+    );
+  }
+
+  const transition = openExpulsionMotion({
+    id: asMotionId(context.ids.next('mot')),
+    accused,
+    grounds: {
+      storeId: pior.record.storeId,
+      conductSuspensions: pior.conductSuspensions,
+      breachesInWindow: pior.record.withinWindow,
+      kinds: [...new Set(pior.record.breaches.map((breach) => breach.kind))],
+      observedAt: context.clock.now(),
+    },
+    openedBy: actor.member,
+    openedByStore: actor.store,
+    user: actor.user,
+    now: context.clock.now(),
+    policy: context.policies.expulsion,
+  });
+  if (!transition.ok) return transition;
+
+  await context.repos.motions.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+  return ok(await motionView(context, transition.value.state));
+}
+
+/**
+ * Uma fundadora apoia a mocao. O apoio que fecha o quorum ja desliga — nao ha
+ * passo manual entre a decisao das fundadoras e o efeito, pelo mesmo motivo que
+ * o terceiro endosso ja credencia: seriam dois estados para o mesmo fato.
+ */
+export async function supportExpulsionMotion(
+  context: AppContext,
+  actor: Actor,
+  motionId: MotionId,
+  note?: string,
+): Promise<Result<MotionView, DomainError>> {
+  const motion = await context.repos.motions.byId(motionId);
+  if (motion === undefined) {
+    return err(notFoundError('MOTION_NOT_FOUND', 'Mocao nao encontrada.', { motionId }));
+  }
+
+  const transition = supportExpulsion({
+    motion,
+    founder: actor.member,
+    founderStore: actor.store,
+    user: actor.user,
+    ...(note === undefined ? {} : { note }),
+    now: context.clock.now(),
+    founders: await founderRoll(context, motion.clusterId),
+    policy: context.policies.expulsion,
+  });
+  if (!transition.ok) return transition;
+
+  const decided = transition.value.state;
+  await context.repos.motions.save(decided);
+  await publish(context, transition.value.events, actor);
+
+  if (decided.status !== MotionStatus.CARRIED) return ok(await motionView(context, decided));
+
+  const expelled = await executeCarriedMotion(context, decided);
+  return ok(await motionView(context, decided, expelled));
+}
+
+async function executeCarriedMotion(
+  context: AppContext,
+  motion: ExpulsionMotion,
+): Promise<Member | null> {
+  const member = await context.repos.members.byId(motion.memberId);
+  if (member === undefined) return null;
+
+  const stores = await context.repos.stores.byMember(member.id);
+  const result = executeExpulsion(motion, member, stores);
+  if (!result.ok) return null;
+
+  // Os carros que a empresa desligada ainda detem. Levantados ANTES de gravar,
+  // porque e a lista que vai no evento — e e por ela que cada loja dona fica
+  // sabendo, no mesmo instante, que precisa chamar o carro de volta.
+  const emCustodia: string[] = [];
+  for (const store of stores) {
+    for (const transfer of await context.repos.transfers.allPending()) {
+      if (transfer.toStoreId === store.id || transfer.fromStoreId === store.id) {
+        emCustodia.push(transfer.vehicleId);
+      }
+    }
+  }
+
+  await context.repos.members.save(result.value.member);
+  for (const store of result.value.stores) await context.repos.stores.save(store);
+  await publish(
+    context,
+    expulsionEvents(motion, result.value.member, result.value.stores, [...new Set(emCustodia)], context.clock.now()),
+  );
+
+  return result.value.member;
+}
+
+export async function viewMotion(
+  context: AppContext,
+  motionId: MotionId,
+): Promise<Result<MotionView, DomainError>> {
+  const motion = await context.repos.motions.byId(motionId);
+  if (motion === undefined) {
+    return err(notFoundError('MOTION_NOT_FOUND', 'Mocao nao encontrada.', { motionId }));
+  }
+  return ok(await motionView(context, motion));
+}
+
+/** Derruba as mocoes que venceram o prazo sem juntar o quorum. */
+export async function sweepLapsedMotions(
+  context: AppContext,
+  clusterId: ClusterId,
+): Promise<number> {
+  const now = context.clock.now();
+  let caducadas = 0;
+
+  for (const motion of await context.repos.motions.openInCluster(clusterId)) {
+    const transition = lapseMotion({ motion, now, policy: context.policies.expulsion });
+    if (!transition.ok || transition.value.events.length === 0) continue;
+    await context.repos.motions.save(transition.value.state);
+    await publish(context, transition.value.events);
+    caducadas += 1;
+  }
+
+  return caducadas;
 }

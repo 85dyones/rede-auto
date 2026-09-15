@@ -10,6 +10,10 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Praça / cluster | `Cluster` | a rede local. Estoque, custódia, travas, negociação e governança não atravessam a fronteira. |
 | Praça do piloto | `curitiba-rmc` | Curitiba e Região: 10 municípios, raio operacional declarado de 60 km, 10 fundadoras no seed. |
 | Raio operacional | `operatingRadiusKm` | alcance declarado da praça. Não bloqueia nada — informa a governança e explica por que a rede é local. |
+| Pátio (coordenada) | `StoreProfile.yard` | onde a loja fica, em lat/lng. É contra ela que a entrega declarada é conferida (raio de 500 m). |
+| Quebra de protocolo | `Breach` | prazo de entrega ou retirada vencido. Objetiva, atribuível e já medida — nunca julgamento. |
+| Janela de conduta | `ConductPolicy.windowMonths` | 12 meses móveis. Três quebras dentro dela suspendem o pátio; ao sair, ele reabre sozinho. |
+| Moção de desligamento | `ExpulsionMotion` | só contra quem tem reincidência registrada. Dois terços das fundadoras, sem voto contra, com prazo — e o default do silêncio é "fica". |
 | Alcançável | `EndorsementTally.reachable` | se ainda sobram fundadoras suficientes para fechar os três endossos. `false` avisa na abertura o que, sem ele, só apareceria como caducidade 30 dias depois. |
 | Janela de fundação | `foundingWindowEndsAt` | prazo em que uma loja credenciada ainda nasce fundadora (meia adesão). 90 dias por padrão, teto de um ano. Quem entrar na janela, leva. |
 | Teto de raio | `MAX_OPERATING_RADIUS_KM` | 300 km. Acima disso ida e volta não cabem no dia útil e o SLA de recall deixa de ser cumprível. |

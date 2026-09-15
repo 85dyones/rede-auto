@@ -13,7 +13,15 @@ import { asClusterId, asMemberId, asStoreId, asUserId } from '../domain/shared/i
 import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody.ts';
 import type { Actor } from './context.ts';
 import { loadVehicle, openCommercialLock, registerVehicle, searchCatalog } from './inventory-service.ts';
-import { startCustodyTransfer } from './custody-service.ts';
+import {
+  completeCustodyTransfer,
+  declareVehicleDropOff,
+  requestVehicleRecall,
+  startCustodyTransfer,
+} from './custody-service.ts';
+import { BreachKind } from '../domain/conduct/breach.ts';
+import { RecallReason } from '../domain/recall/recall.ts';
+import { runConductSweep, storeConduct } from './conduct-service.ts';
 import { endorseApplication, submitApplication, viewApplication } from './governance-service.ts';
 import { MemberKind, MemberStatus, type Member } from '../domain/network/member.ts';
 import { StoreStatus, canTransact } from '../domain/network/store.ts';
@@ -368,6 +376,7 @@ const candidata = {
   phone: '(41) 99876-5432',
   email: 'contato@novagaragem.com.br',
   responsibleName: 'Joao Pereira',
+  yard: { lat: -25.5307, lng: -49.2064 },
 };
 
 /** Apresenta a candidata pela empresa 0 e junta os tres endossos das 1..3. */
@@ -722,6 +731,180 @@ describe('cobranca: adesao, mensalidade e a suspensao por 30 dias', () => {
 
     assert.equal(extrato.tariffVersion, PILOT_TARIFF.version);
     assert.equal(extrato.tariffFrozen, false);
+    await app.stop();
+  });
+});
+
+describe('conduta: as quebras de protocolo que o sistema mede sozinho', () => {
+  /** Carro da loja A no patio da loja B, em estoque avancado. */
+  async function carroNaLojaB() {
+    const base = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(base.app.context, base.lojaA, cadastro('RGT4B71', '9BWZZZ377VT004251')),
+    );
+    const saida = unwrap(
+      await startCustodyTransfer(base.app.context, base.lojaA, {
+        vehicleId: carro.id,
+        toStoreId: base.lojaB.store.id,
+        purpose: TransferPurpose.EXTENDED_STOCK,
+        checkout: termoDeVistoria(base.lojaA, 38_400),
+      }),
+    );
+    return { ...base, carro, transfer: saida.transfer };
+  }
+
+  const cluster = (app: Application) => app.seed!.cluster.id;
+
+  test('o SLA de recall estourado vira quebra do custodiante', async () => {
+    const { app, clock, lojaA, lojaB, carro, transfer } = await carroNaLojaB();
+    unwrap(await completeCustodyTransfer(app.context, lojaB, transfer.id, termoDeVistoria(lojaB, 38_400)));
+
+    unwrap(
+      await requestVehicleRecall(app.context, lojaA, {
+        vehicleId: carro.id,
+        reason: RecallReason.OWN_SALE,
+      }),
+    );
+
+    clock.advance(5 * 24 * HOUR);
+    await runSweep(app.context);
+
+    const conduta = await storeConduct(app.context, lojaB.store.id);
+    assert.equal(conduta.record.withinWindow, 1);
+    assert.equal(conduta.record.breaches[0]?.kind, BreachKind.RECALL_SLA);
+    await app.stop();
+  });
+
+  test('rodar a varredura mil vezes nao multiplica a mesma quebra', async () => {
+    // O varredor roda a cada minuto. Sem o id deterministico da quebra, um
+    // unico atraso suspenderia a praca inteira antes do almoco.
+    const { app, clock, lojaA, lojaB, carro, transfer } = await carroNaLojaB();
+    unwrap(await completeCustodyTransfer(app.context, lojaB, transfer.id, termoDeVistoria(lojaB, 38_400)));
+    unwrap(
+      await requestVehicleRecall(app.context, lojaA, {
+        vehicleId: carro.id,
+        reason: RecallReason.OWN_SALE,
+      }),
+    );
+
+    // Varredura completa, vinte vezes: e o que o sweeper faz de verdade, e a
+    // quebra de conduta depende de `sweepRecallBreaches` ter marcado o SLA
+    // antes — por isso a ordem dentro de `runSweep` importa.
+    clock.advance(5 * 24 * HOUR);
+    for (let i = 0; i < 20; i += 1) await runSweep(app.context);
+
+    const conduta = await storeConduct(app.context, lojaB.store.id);
+    assert.equal(conduta.record.withinWindow, 1, 'uma quebra, nao vinte');
+    assert.equal(
+      (await app.context.repos.stores.byId(lojaB.store.id))?.status,
+      StoreStatus.ACTIVE,
+      'e a loja segue aberta',
+    );
+    await app.stop();
+  });
+
+  test('entrega declarada no patio e nao aceita vira quebra de QUEM RECEBE', async () => {
+    // So e atribuivel porque a coordenada foi conferida contra o patio de
+    // destino. Sem a conferencia seria palavra contra palavra.
+    const { app, clock, lojaA, lojaB, transfer } = await carroNaLojaB();
+    unwrap(
+      await declareVehicleDropOff(app.context, lojaA, transfer.id, lojaB.store.profile.yard),
+    );
+
+    clock.advance(3 * 24 * HOUR);
+    await runConductSweep(app.context, cluster(app));
+
+    const recebedora = await storeConduct(app.context, lojaB.store.id);
+    assert.equal(recebedora.record.breaches[0]?.kind, BreachKind.DROPOFF_NOT_ACKNOWLEDGED);
+
+    const entregadora = await storeConduct(app.context, lojaA.store.id);
+    assert.equal(entregadora.record.withinWindow, 0, 'quem entregou cumpriu o protocolo');
+    await app.stop();
+  });
+
+  test('termo esquecido em transito vira quebra da ORIGEM', async () => {
+    // Quem tirou o carro do patio responde por ele ate o aceite.
+    const { app, clock, lojaA, lojaB } = await carroNaLojaB();
+
+    clock.advance(10 * 24 * HOUR);
+    await runConductSweep(app.context, cluster(app));
+
+    assert.equal(
+      (await storeConduct(app.context, lojaA.store.id)).record.breaches[0]?.kind,
+      BreachKind.TRANSFER_ABANDONED,
+    );
+    assert.equal((await storeConduct(app.context, lojaB.store.id)).record.withinWindow, 0);
+    await app.stop();
+  });
+
+  test('tres quebras na janela suspendem o patio — e so o patio', async () => {
+    const { app, clock, lojaA } = await carroNaLojaB();
+
+    // Mais dois termos abandonados pela mesma loja: tres no total.
+    for (const [placa, chassi] of [
+      ['KLM8D42', '9BWZZZ377VT004252'],
+      ['XYZ9K88', '9BWZZZ377VT004253'],
+    ] as const) {
+      const outro = unwrap(await registerVehicle(app.context, lojaA, cadastro(placa, chassi)));
+      unwrap(
+        await startCustodyTransfer(app.context, lojaA, {
+          vehicleId: outro.id,
+          toStoreId: app.seed!.stores[2]!.store.id,
+          purpose: TransferPurpose.EXTENDED_STOCK,
+          checkout: termoDeVistoria(lojaA, 38_400),
+        }),
+      );
+    }
+
+    clock.advance(10 * 24 * HOUR);
+    await runConductSweep(app.context, cluster(app));
+
+    const conduta = await storeConduct(app.context, lojaA.store.id);
+    assert.equal(conduta.record.withinWindow, 3);
+    assert.equal(conduta.record.reachedThreshold, true);
+
+    const patio = (await app.context.repos.stores.byId(lojaA.store.id))!;
+    assert.equal(patio.status, StoreStatus.SUSPENDED);
+
+    // A empresa segue em dia: conduta e do patio, inadimplencia e da empresa.
+    assert.equal(
+      (await app.context.repos.members.byId(lojaA.member.id))?.status,
+      MemberStatus.ACTIVE,
+    );
+    assert.equal(canTransact(patio, lojaA.member), false, 'mas o patio nao opera');
+    await app.stop();
+  });
+
+  test('a janela movel reabre o patio sem ninguem precisar lembrar', async () => {
+    const { app, clock, lojaA } = await carroNaLojaB();
+    for (const [placa, chassi] of [
+      ['KLM8D42', '9BWZZZ377VT004252'],
+      ['XYZ9K88', '9BWZZZ377VT004253'],
+    ] as const) {
+      const outro = unwrap(await registerVehicle(app.context, lojaA, cadastro(placa, chassi)));
+      unwrap(
+        await startCustodyTransfer(app.context, lojaA, {
+          vehicleId: outro.id,
+          toStoreId: app.seed!.stores[2]!.store.id,
+          purpose: TransferPurpose.EXTENDED_STOCK,
+          checkout: termoDeVistoria(lojaA, 38_400),
+        }),
+      );
+    }
+
+    clock.advance(10 * 24 * HOUR);
+    await runConductSweep(app.context, cluster(app));
+    assert.equal(
+      (await app.context.repos.stores.byId(lojaA.store.id))?.status,
+      StoreStatus.SUSPENDED,
+    );
+
+    // Treze meses depois: as tres quebras sairam da janela.
+    clock.set(addMonths(clock.now(), 13));
+    const resultado = await runConductSweep(app.context, cluster(app));
+
+    assert.equal(resultado.reopened, 1);
+    assert.equal((await app.context.repos.stores.byId(lojaA.store.id))?.status, StoreStatus.ACTIVE);
     await app.stop();
   });
 });

@@ -18,6 +18,7 @@ import type { ClusterId, MemberId, StoreId, UserId } from '../shared/ids.ts';
 import { parseCnpj, requireText, requireOneOf } from '../shared/validation.ts';
 import { TradeInStance } from '../vehicle/vehicle.ts';
 import { type Member, isFoundingMemberOf, memberInGoodStanding } from './member.ts';
+import type { GeoPoint } from '../shared/geo.ts';
 
 export const StoreStatus = {
   ACTIVE: 'ACTIVE',
@@ -59,6 +60,22 @@ export type StoreProfile = {
   readonly phone: string;
   readonly email: string;
   readonly responsibleName: string;
+  /**
+   * A coordenada do patio.
+   *
+   * Obrigatoria, e nao opcional: e ela que torna verificavel a geolocalizacao da
+   * declaracao de entrega. Sem o patio em coordenada, "deixei no patio de voces"
+   * e afirmacao sem contraparte — era o estado anterior, e a coordenada coletada
+   * na entrega nao servia para nada.
+   *
+   * Exigir no tipo obriga toda loja nova a informar. Um campo opcional deixaria
+   * o protocolo de entrega funcionar so para quem lembrou de preencher, que e a
+   * pior forma de meia-implementacao: a que parece pronta.
+   *
+   * Mora na ficha, e nao no agregado, para nao existirem duas respostas para
+   * "onde fica o patio" — duas acabam divergindo.
+   */
+  readonly yard: GeoPoint;
 };
 
 export type Store = {
@@ -120,7 +137,52 @@ export function parseStoreProfile(input: unknown): Result<StoreProfile, DomainEr
     phone: parsePhone(raw['phone']),
     email: parseEmail(raw['email']),
     responsibleName: requireText(raw['responsibleName'], 'responsavel', { min: 3, max: 200 }),
+    yard: parseYard(raw['yard']),
   });
+}
+
+/**
+ * Coordenada do patio. Recusa o (0, 0) explicitamente: e o valor que aparece
+ * quando alguem manda campo vazio, fica no golfo da Guine e passaria em
+ * qualquer checagem de faixa.
+ */
+function parseYard(value: unknown): Result<GeoPoint, DomainError> {
+  if (typeof value !== 'object' || value === null) {
+    return err(
+      validationError(
+        'YARD_REQUIRED',
+        'Informe a coordenada do patio: e ela que torna a entrega verificavel.',
+      ),
+    );
+  }
+  const raw = value as Record<string, unknown>;
+  const lat = raw['lat'];
+  const lng = raw['lng'];
+
+  if (
+    typeof lat !== 'number' ||
+    typeof lng !== 'number' ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    return err(
+      validationError('YARD_INVALID', 'Coordenada do patio invalida.', { received: value }),
+    );
+  }
+  if (lat === 0 && lng === 0) {
+    return err(
+      validationError(
+        'YARD_INVALID',
+        'Coordenada do patio invalida: (0, 0) e o que aparece quando o campo vem vazio.',
+      ),
+    );
+  }
+
+  return ok({ lat, lng });
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;

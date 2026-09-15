@@ -847,6 +847,7 @@ describe('credenciamento: quem decide quem entra sao os membros', () => {
     phone: '(41) 99876-5432',
     email: 'contato@novagaragem.com.br',
     responsibleName: 'Joao Pereira',
+    yard: { lat: -25.5307, lng: -49.2064 },
   };
 
   test('uma fundadora apresenta a candidata', async () => {
@@ -987,6 +988,7 @@ describe('empresa e patio: a separacao que a tabela de precos exigiu', () => {
           phone: '(41) 3344-5566',
           email: 'contato@outraempresa.com.br',
           responsibleName: 'Ana Lima',
+          yard: { lat: -25.4447, lng: -49.1925 },
         },
       },
     });
@@ -1017,6 +1019,7 @@ describe('empresa e patio: a separacao que a tabela de precos exigiu', () => {
             phone: '(41) 3344-7788',
             email: 'filial@prime.com.br',
             responsibleName: 'Paulo Prado',
+            yard: { lat: -25.4284, lng: -49.2733 },
           },
         },
       },
@@ -1074,6 +1077,64 @@ describe('financeiro: adesao, mensalidade e o que a empresa consegue conferir', 
     });
 
     assert.equal(filial.body.empresa.id, matriz.body.empresa.id);
+  });
+});
+
+describe('conduta e desligamento', () => {
+  test('o registro de conduta comeca limpo e diz quando a janela alivia', async () => {
+    const response = await api<{
+      patios: Array<{ quebrasNaJanela: number; limite: number; janelaAliviaEm: string | null }>;
+    }>('GET', '/api/v1/conduta', { key: PRIME });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.patios.length, 2, 'matriz + Boqueirao');
+    assert.equal(response.body.patios[0]?.quebrasNaJanela, 0);
+    assert.equal(response.body.patios[0]?.limite, 3);
+    assert.equal(response.body.patios[0]?.janelaAliviaEm, null, 'sem quebra, nada a expirar');
+  });
+
+  test('mocao sem reincidencia registrada e recusada', async () => {
+    // A guarda central: sem ela, o desligamento viraria o veto que a admissao
+    // recusou — e serviria para remover quem esta vendendo bem.
+    const lojas = await api<{ lojas: Array<{ empresaId: string; nomeFantasia: string }> }>(
+      'GET', '/api/v1/lojas', { key: PRIME },
+    );
+    const alvo = lojas.body.lojas.find((l) => l.nomeFantasia === 'Veloz Seminovos')!;
+
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/desligamentos', {
+      key: PRIME,
+      body: { empresaId: alvo.empresaId },
+    });
+
+    assert.equal(response.status, 422);
+    assert.equal(response.body.erro.codigo, 'NO_RECIDIVISM_ON_RECORD');
+  });
+
+  test('vendedor nao abre mocao de desligamento', async () => {
+    const lojas = await api<{ lojas: Array<{ empresaId: string; nomeFantasia: string }> }>(
+      'GET', '/api/v1/lojas', { key: PRIME },
+    );
+    const alvo = lojas.body.lojas.find((l) => l.nomeFantasia === 'Veloz Seminovos')!;
+
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/desligamentos', {
+      key: PRIME_VENDEDOR,
+      body: { empresaId: alvo.empresaId },
+    });
+
+    // 403 antes de 422: o vendedor nao chega a saber se a concorrente tem
+    // registro de conduta. Autorizacao antes de prova, como em todo o resto.
+    assert.equal(response.status, 403);
+    assert.equal(response.body.erro.codigo, 'NOT_A_PRINCIPAL');
+  });
+
+  test('empresa de outra praca nao e alvo', async () => {
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/desligamentos', {
+      key: PRIME,
+      body: { empresaId: 'mbr_inexistente' },
+    });
+
+    assert.equal(response.status, 404);
+    assert.equal(response.body.erro.codigo, 'MEMBER_NOT_FOUND');
   });
 });
 

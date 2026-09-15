@@ -10,7 +10,7 @@
 
 import { type Result, err, ok } from '../domain/shared/result.ts';
 import type { DomainError } from '../domain/shared/errors.ts';
-import { forbiddenError } from '../domain/shared/errors.ts';
+import { forbiddenError, notFoundError } from '../domain/shared/errors.ts';
 import type { DomainEvent } from '../domain/shared/events.ts';
 import type { Instant } from '../domain/shared/clock.ts';
 import {
@@ -233,12 +233,26 @@ export async function declareVehicleDropOff(
   const loaded = await loadVehicle(context, actor, asVehicleId(transfer.vehicleId));
   if (!loaded.ok) return loaded;
 
+  // A loja de destino, cuja coordenada de patio confere a declaracao. Sem ela
+  // nao ha entrega a declarar: um termo apontando para loja inexistente e
+  // estado invalido, nao um caso a tratar com tolerancia.
+  const destination = await context.repos.stores.byId(transfer.toStoreId);
+  if (destination === undefined) {
+    return err(
+      notFoundError('DESTINATION_STORE_NOT_FOUND', 'A loja de destino do termo nao existe.', {
+        transferId,
+        storeId: transfer.toStoreId,
+      }),
+    );
+  }
+
   const transition = declareDropOff({
     vehicle: loaded.value.vehicle,
     transfer,
     actorStoreId: actor.store.id,
     actorUserId: actor.user.id,
     geolocation,
+    destination,
     ...(note === undefined ? {} : { note }),
     now: context.clock.now(),
   });

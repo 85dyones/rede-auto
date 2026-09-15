@@ -30,6 +30,7 @@ import { runSweep } from '../src/application/scheduler.ts';
 import {
   completeCustodyTransfer,
   custodianAt,
+  declareVehicleDropOff,
   custodyHistory,
   deliverVehicleToConsumer,
   markRecallReadyForPickup,
@@ -50,6 +51,8 @@ import { sealTerm, TransferPurpose, PhotoAngle } from '../src/domain/custody/cus
 import { VehicleAngle } from '../src/domain/vehicle/vehicle.ts';
 import { foundingWindowDaysLeft } from '../src/domain/cluster/cluster.ts';
 import { seededActor } from '../src/infra/seed.ts';
+import { storeConduct } from '../src/application/conduct-service.ts';
+import { describeBreach } from '../src/domain/conduct/breach.ts';
 import { memberStatement, runBillingSweep } from '../src/application/billing-service.ts';
 import { EvidenceType } from '../src/domain/lock/evidence.ts';
 import { RecallReason } from '../src/domain/recall/recall.ts';
@@ -117,6 +120,20 @@ function termo(context: AppContext, actor: Actor, odometro: number, combustivel:
     ),
   );
 }
+
+/** Um Polo da Veloz, so para o ato do protocolo de entrega. */
+const FEED_ENTREGA = `<?xml version="1.0" encoding="UTF-8"?>
+<estoque>
+  <veiculo>
+    <id>VZ-9001</id><placa>JKL2M33</placa><chassi>9BWZZZ377VT009911</chassi>
+    <marca>Volkswagen</marca><modelo>Polo</modelo><versao>1.0 TSI Comfortline</versao>
+    <anofabricacao>2022</anofabricacao><anomodelo>2023</anomodelo>
+    <km>41200</km><cor>Cinza</cor><combustivel>Flex</combustivel><cambio>Automatico</cambio>
+    <preco>84.900,00</preco><preco_repasse>78.000,00</preco_repasse>
+    <fotos><foto>https://cdn.veloz.com.br/polo-1.jpg</foto></fotos>
+    <laudo_cautelar><situacao>APROVADO</situacao><numero>LC-9001</numero><empresa>Cautelar Brasil</empresa><data>25/02/2026</data></laudo_cautelar>
+  </veiculo>
+</estoque>`;
 
 const FEED_PRIME = `<?xml version="1.0" encoding="UTF-8"?>
 <estoque>
@@ -583,6 +600,7 @@ const candidatura = unwrap(
     phone: '(15) 99876-5432',
     email: 'contato@novagaragem.com.br',
     responsibleName: 'Joao Pereira',
+    yard: { lat: -25.5307, lng: -49.2064 },
   }),
 );
 diz(
@@ -643,6 +661,79 @@ destaque(
 destaque(
   'Fundadora paga meia adesao e fica 24 meses na tabela que assinou — a tabela ' +
     'INTEIRA, entao patio aberto no mes 10 tambem entra pelo preco congelado.',
+);
+
+// ---------------------------------------------------------------------------
+ato('Protocolo de entrega: a coordenada que o sistema confere');
+
+// Um carro da Loja B que nao entrou em nenhum dos atos anteriores: o
+// protocolo de entrega merece um caso limpo, sem estado herdado.
+const paraEntregar = unwrap(
+  await syncStoreFeed(context, lojaB, { xml: FEED_ENTREGA }),
+).changes[0]?.vehicle.id;
+
+if (paraEntregar !== undefined) {
+  const termoConduta = unwrap(
+    await startCustodyTransfer(context, lojaB, {
+      vehicleId: paraEntregar,
+      toStoreId: lojaC.store.id,
+      purpose: TransferPurpose.EXTENDED_STOCK,
+      checkout: termo(context, lojaB, 54_210, 6),
+    }),
+  );
+
+  const longe = await declareVehicleDropOff(
+    context,
+    lojaB,
+    termoConduta.transfer.id,
+    lojaD.store.profile.yard,
+  );
+  diz(`Entrega declarada do patio errado: ${longe.ok ? 'aceita' : longe.error.message}`);
+  destaque(
+    'Antes disto a coordenada era guardada e nunca lida — provava UMA posicao, nao A ' +
+      'posicao. Com o patio de destino em coordenada, "deixei no patio de voces" vira ' +
+      'afirmacao verificavel, e e ela que torna a quebra seguinte atribuivel.',
+  );
+
+  unwrap(
+    await declareVehicleDropOff(
+      context,
+      lojaB,
+      termoConduta.transfer.id,
+      lojaC.store.profile.yard,
+      'Chave na recepcao, vaga 12.',
+    ),
+  );
+  diz('Entrega declarada no patio de destino: aceita.');
+
+  avanca(3 * DAY, 'tres dias sem o aceite de quem recebeu');
+  await runSweep(context);
+
+  const condutaC = await storeConduct(context, lojaC.store.id);
+  diz('');
+  diz(`Registro de conduta de ${lojaC.store.profile.tradeName}:`);
+  for (const quebra of condutaC.record.breaches) {
+    diz(`  ${describeBreach(quebra.kind)} — ${quebra.overdueMinutes} min uteis de atraso`);
+  }
+  diz(
+    `  ${condutaC.record.withinWindow} de ${condutaC.record.threshold} quebras na janela ` +
+      'movel de 12 meses',
+  );
+}
+
+destaque(
+  'Tres quebras na janela suspendem o PATIO — nao a empresa. Inadimplencia e o caso ' +
+    'oposto: la o contrato e da empresa e a suspensao alcanca todas as lojas dela.',
+);
+destaque(
+  'A janela e MOVEL: uma quebra por ano durante tres anos nunca chega a tres. E o ' +
+    'patio reabre sozinho quando ela alivia — punicao que depende de alguem lembrar ' +
+    'de tirar vira permanente.',
+);
+destaque(
+  'Desligar exige REINCIDENCIA REGISTRADA. Entrar e discricionario (a fundadora ' +
+    'endossa quem conhece); sair e probatorio. Sem essa exigencia, o desligamento ' +
+    'viraria o veto que a admissao recusou — e serviria para remover quem vende bem.',
 );
 
 // ---------------------------------------------------------------------------

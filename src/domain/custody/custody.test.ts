@@ -24,6 +24,7 @@ import { unwrap } from '../shared/result.ts';
 import {
   atYardOf,
   buildFoundingNetwork,
+  pointNorthOf,
   buildSignedTerm,
   buildSigner,
   buildTermContent,
@@ -214,7 +215,8 @@ describe('saida do patio (checkout)', () => {
  * horas, elas ficam indistinguiveis de "carro sumido no caminho".
  */
 describe('entrega declarada com geolocalizacao', () => {
-  const NO_PATIO = { lat: -25.4809, lng: -49.3044 };
+  /** A coordenada do patio de destino. E contra ela que a declaracao e conferida. */
+  const NO_PATIO = lojaB.profile.yard;
 
   function entregue(at = T0 + 2 * HOUR) {
     const opened = openAtoB(vehicleAtA());
@@ -224,6 +226,7 @@ describe('entrega declarada com geolocalizacao', () => {
         transfer: opened.transfer,
         actorStoreId: lojaA.id,
         actorUserId: gerenteA.id,
+        destination: lojaB,
         geolocation: NO_PATIO,
         note: 'Chave na recepcao, vaga 12.',
         now: at,
@@ -253,12 +256,51 @@ describe('entrega declarada com geolocalizacao', () => {
       transfer: opened.transfer,
       actorStoreId: lojaA.id,
       actorUserId: gerenteA.id,
+      destination: lojaB,
       geolocation: { lat: Number.NaN, lng: -49.3 },
       now: T0 + HOUR,
     });
 
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'DROP_OFF_GEOLOCATION_REQUIRED');
+  });
+
+  test('coordenada longe do patio de destino e recusada na hora', () => {
+    // Antes disto a coordenada era guardada e nunca lida: provava *uma*
+    // posicao, nao *a* posicao. Recusar aqui impede o erro em vez de puni-lo
+    // depois — e devolve a distancia para quem esta com o celular na mao.
+    const opened = openAtoB(vehicleAtA());
+    const result = declareDropOff({
+      vehicle: opened.vehicle,
+      transfer: opened.transfer,
+      actorStoreId: lojaA.id,
+      actorUserId: gerenteA.id,
+      destination: lojaB,
+      geolocation: lojaC.profile.yard,
+      now: T0 + HOUR,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'DROP_OFF_AWAY_FROM_YARD');
+    const distancia = result.ok === false ? (result.error.details?.['distanceMeters'] as number) : 0;
+    assert.ok(distancia > 500, 'o erro diz a distancia, para o operador resolver sem suporte');
+  });
+
+  test('erro de GPS dentro do raio ainda passa', () => {
+    // 300 m: erro comum de celular em rua de centro. Um raio apertado
+    // transformaria falha de sinal em acusacao de declaracao falsa.
+    const opened = openAtoB(vehicleAtA());
+    const result = declareDropOff({
+      vehicle: opened.vehicle,
+      transfer: opened.transfer,
+      actorStoreId: lojaA.id,
+      actorUserId: gerenteA.id,
+      destination: lojaB,
+      geolocation: pointNorthOf(lojaB.profile.yard, 300),
+      now: T0 + HOUR,
+    });
+
+    assert.equal(result.ok, true);
   });
 
   test('quem declara e quem levou, nao quem recebe', () => {
@@ -268,6 +310,7 @@ describe('entrega declarada com geolocalizacao', () => {
       transfer: opened.transfer,
       actorStoreId: lojaB.id,
       actorUserId: gerenteA.id,
+      destination: lojaB,
       geolocation: NO_PATIO,
       now: T0 + HOUR,
     });
@@ -321,6 +364,7 @@ describe('entrega declarada com geolocalizacao', () => {
       transfer: entregueState.transfer,
       actorStoreId: lojaA.id,
       actorUserId: gerenteA.id,
+      destination: lojaB,
       geolocation: NO_PATIO,
       now: T0 + 4 * HOUR,
     });

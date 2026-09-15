@@ -545,12 +545,45 @@ describe('ficha cadastral da candidata', () => {
       phone: '(15) 99876-5432',
       email: 'Contato@NovaGaragem.com.BR',
       responsibleName: 'Joao Pereira',
+      yard: { lat: -23.5015, lng: -47.4526 },
     });
     const profile = unwrap(valid);
     assert.equal(profile.cnpj, '11222333000181');
     assert.equal(profile.state, 'SP');
     assert.equal(profile.phone, '15998765432');
     assert.equal(profile.email, 'contato@novagaragem.com.br');
+    assert.deepEqual(profile.yard, { lat: -23.5015, lng: -47.4526 });
+  });
+
+  test('a coordenada do patio e obrigatoria', () => {
+    // Sem ela a declaracao de entrega nao tem contra o que ser conferida, e o
+    // protocolo de entrega deixa de ser verificavel para esta loja.
+    const semPatio = parseStoreProfile({
+      legalName: 'Nova Garagem Veiculos LTDA',
+      tradeName: 'Nova Garagem',
+      cnpj: '11.222.333/0001-81',
+      city: 'Sorocaba',
+      state: 'SP',
+      phone: '(15) 99876-5432',
+      email: 'contato@novagaragem.com.br',
+      responsibleName: 'Joao Pereira',
+    });
+    assert.equal(semPatio.ok === false && semPatio.error.code, 'YARD_REQUIRED');
+  });
+
+  test('(0, 0) e recusado: e o que aparece quando o campo vem vazio', () => {
+    const noGolfo = parseStoreProfile({
+      legalName: 'Nova Garagem Veiculos LTDA',
+      tradeName: 'Nova Garagem',
+      cnpj: '11.222.333/0001-81',
+      city: 'Sorocaba',
+      state: 'SP',
+      phone: '(15) 99876-5432',
+      email: 'contato@novagaragem.com.br',
+      responsibleName: 'Joao Pereira',
+      yard: { lat: 0, lng: 0 },
+    });
+    assert.equal(noGolfo.ok === false && noGolfo.error.code, 'YARD_INVALID');
   });
 
   test('reporta o primeiro erro e lista os demais na mesma resposta', () => {

@@ -7,14 +7,18 @@
  */
 
 import { notFoundError } from '../../domain/shared/errors.ts';
-import { asApplicationId, asChargeId } from '../../domain/shared/ids.ts';
+import { asApplicationId, asChargeId, asMemberId, asMotionId } from '../../domain/shared/ids.ts';
 import type { AppContext } from '../../application/context.ts';
 import type { ApplicationView } from '../../application/governance-service.ts';
 import {
   memberStatement,
   registerChargePayment,
 } from '../../application/billing-service.ts';
+import { memberConduct } from '../../application/conduct-service.ts';
 import {
+  openExpulsion,
+  supportExpulsionMotion,
+  viewMotion,
   openStoreBranch,
   retireApplication,
   submitApplication,
@@ -23,7 +27,16 @@ import {
 } from '../../application/governance-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
-import { applicationDto, chargeDto, clusterDto, memberDto, statementDto, storeDto } from '../serialize.ts';
+import {
+  applicationDto,
+  chargeDto,
+  clusterDto,
+  conductDto,
+  memberDto,
+  motionDto,
+  statementDto,
+  storeDto,
+} from '../serialize.ts';
 import { asObject, optionalText } from '../parse.ts';
 import { requireActor } from './support.ts';
 
@@ -160,6 +173,67 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
       cobranca: chargeDto(result.value.charge),
       empresaReativada: result.value.reinstated === null ? null : result.value.reinstated.id,
     });
+  });
+
+  /**
+   * O registro de conduta dos patios da SUA empresa.
+   *
+   * Cada loja ve o proprio. O registro alheio aparece so no fundamento de uma
+   * mocao de desligamento — que e o unico momento em que a rede precisa dele, e
+   * ja e um ato publico de governanca.
+   */
+  router.get('/api/v1/conduta', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const views = await memberConduct(context, actor.value.member.id);
+    return json(200, { patios: views.map(conductDto) });
+  });
+
+  /**
+   * Abre mocao de desligamento. So contra quem tem reincidencia REGISTRADA — o
+   * fundamento e apurado do registro, nao informado por quem abre.
+   */
+  router.post('/api/v1/desligamentos', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const result = await openExpulsion(
+      context,
+      actor.value,
+      asMemberId(String(body.value['empresaId'] ?? '')),
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(201, motionDto(result.value.motion, result.value.tally, result.value.expelled));
+  });
+
+  /** Apoio de fundadora. O apoio que fecha o quorum ja desliga. */
+  router.post('/api/v1/desligamentos/:id/apoios', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const result = await supportExpulsionMotion(
+      context,
+      actor.value,
+      asMotionId(request.params['id'] as string),
+      optionalText(body.value, 'justificativa'),
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(200, motionDto(result.value.motion, result.value.tally, result.value.expelled));
+  });
+
+  router.get('/api/v1/desligamentos/:id', async (request) => {
+    const result = await viewMotion(context, asMotionId(request.params['id'] as string));
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(200, motionDto(result.value.motion, result.value.tally, result.value.expelled));
   });
 
   router.post('/api/v1/credenciamentos', async (request) => {

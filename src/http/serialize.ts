@@ -21,6 +21,9 @@ import {
 import type { Store } from '../domain/network/store.ts';
 import { type Member, formatCnpjRoot } from '../domain/network/member.ts';
 import type { Charge } from '../domain/billing/charge.ts';
+import { type Breach, describeBreach } from '../domain/conduct/breach.ts';
+import type { ExpulsionMotion, SupportTally } from '../domain/network/expulsion.ts';
+import type { ConductView } from '../application/conduct-service.ts';
 import type { BillingStatement } from '../application/billing-service.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
 import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
@@ -571,5 +574,72 @@ export function statementDto(statement: BillingStatement) {
       congelada: statement.tariffFrozen,
     },
     cobrancas: statement.charges.map(chargeDto),
+  };
+}
+
+export function breachDto(breach: Breach) {
+  return {
+    id: breach.id,
+    lojaId: breach.storeId,
+    especie: breach.kind,
+    descricao: describeBreach(breach.kind),
+    em: instant(breach.occurredAt),
+    minutosDeAtraso: breach.overdueMinutes,
+    evidenciaId: breach.evidenceId,
+  };
+}
+
+/**
+ * O registro de conduta de um patio.
+ *
+ * `janelaAliviaEm` sai junto porque e a informacao que falta para a suspensao
+ * fazer sentido: sem ela o lojista ve "3 de 3" e nao sabe que a contagem anda
+ * sozinha para tras.
+ */
+export function conductDto(view: ConductView) {
+  return {
+    lojaId: view.record.storeId,
+    quebrasNaJanela: view.record.withinWindow,
+    limite: view.record.threshold,
+    atingiuOLimite: view.record.reachedThreshold,
+    janelaAliviaEm: instant(view.record.oldestExpiresAt),
+    suspensoesPorConduta: view.conductSuspensions,
+    quebras: view.record.breaches.map(breachDto),
+  };
+}
+
+export function motionDto(motion: ExpulsionMotion, tally: SupportTally, expelled: Member | null) {
+  return {
+    id: motion.id,
+    empresaId: motion.memberId,
+    abertaPorEmpresaId: motion.openedByMemberId,
+    situacao: motion.status,
+    abertaEm: instant(motion.openedAt),
+    decididaEm: instant(motion.decidedAt),
+    // O fundamento e copiado na abertura: a janela movel alivia com o tempo, e
+    // a mocao nao pode perder o chao no meio da votacao porque o calendario
+    // andou. O que se julga e o que estava provado quando se abriu.
+    fundamento: {
+      lojaId: motion.grounds.storeId,
+      suspensoesPorConduta: motion.grounds.conductSuspensions,
+      quebrasNaJanela: motion.grounds.breachesInWindow,
+      especies: motion.grounds.kinds,
+      apuradoEm: instant(motion.grounds.observedAt),
+    },
+    apuracao: {
+      apoios: tally.supports,
+      necessarios: tally.required,
+      faltam: tally.stillNeeded,
+      aprovada: tally.carried,
+      fundadorasQuePodemApoiar: tally.foundersYetToSupport,
+      alcancavel: tally.reachable,
+    },
+    apoios: motion.supports.map((support) => ({
+      fundadoraEmpresaId: support.founderMemberId,
+      assinadoNaLojaId: support.givenByStoreId,
+      em: instant(support.givenAt),
+      justificativa: support.note,
+    })),
+    empresaDesligada: expelled === null ? null : expelled.id,
   };
 }

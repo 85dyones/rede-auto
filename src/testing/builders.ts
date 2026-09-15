@@ -106,8 +106,16 @@ export function buildStoreProfile(overrides: Partial<StoreProfile> = {}): StoreP
     phone: '1932334455',
     email: 'contato@automodelo.com.br',
     responsibleName: 'Maria Souza',
+    // Centro de Campinas. Um patio com coordenada por padrao, porque sem ela a
+    // declaracao de entrega nao tem contra o que ser conferida.
+    yard: { lat: -22.9056, lng: -47.0608 },
     ...overrides,
   };
+}
+
+/** Uma coordenada a `meters` metros ao norte da referencia. Para testes de raio. */
+export function pointNorthOf(from: { lat: number; lng: number }, meters: number) {
+  return { lat: from.lat + meters / 111_320, lng: from.lng };
 }
 
 export function buildStore(overrides: Partial<Store> = {}): Store {
@@ -227,6 +235,9 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
       state,
       email: `contato@${slug(tradeName)}.com.br`,
       responsibleName: `Titular ${index + 1}`,
+      // Patios separados por ~2 km. Duas lojas com a mesma coordenada fariam a
+      // conferencia da entrega passar sempre, e o teste nao provaria nada.
+      yard: { lat: -22.9056 + index * 0.02, lng: -47.0608 },
     });
 
     members.push(

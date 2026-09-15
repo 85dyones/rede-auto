@@ -614,7 +614,133 @@ em stand-by por decisão de produto. Nada no desenho os impede depois.
 
 ---
 
-## 27. O que ficou de fora, e por quê
+## 27. A geolocalização da entrega passou a ser conferida
+
+**Decisão.** `StoreProfile.yard` (obrigatório) guarda a coordenada do pátio, e
+`declareDropOff` recusa a declaração feita a mais de 500 m do pátio de destino.
+
+**Por quê.** A geolocalização da entrega já era obrigatória — e não era comparada
+com nada. O comentário do próprio código admitia que "alguém pode declarar do
+estacionamento ao lado", mas o sistema não tinha como saber: provava *uma*
+posição, não *a* posição. Um número que ninguém confere é decoração, não
+registro.
+
+Isso não era só desperdício. Era o que impedia qualquer quebra de protocolo de
+entrega de ser **atribuível**: sem a conferência, "declarei que deixei" contra
+"não chegou" é palavra contra palavra, e nenhuma das duas lojas pode ser
+responsabilizada. Ancorar conduta em cima disso seria ancorar em nada.
+
+**Recusar, e não registrar como falta.** A declaração fora do raio é rejeitada na
+hora, com a distância no erro. Impede o engano em vez de puni-lo, e devolve o
+número para quem está com o celular na mão resolver sozinho. Registrar a
+tentativa recusada como quebra seria pior: ato recusado não causou dano, e falha
+de GPS é indistinguível de má-fé com os dados que existem.
+
+**O raio de 500 m é generoso de propósito.** GPS de celular em rua de centro erra
+mais de cem metros. O que este número precisa separar é "no pátio" de "declarei
+do escritório, do outro lado da cidade" — e para isso 500 m sobra. O custo
+aceito: quem declarar do posto da esquina passa. A coordenada nunca pretendeu ser
+prova irrefutável; ela elimina a declaração feita de qualquer lugar, que era o
+caso real.
+
+**Descartado.** Precisão de elipsoide (Vincenty). Haversine erra ~0,5% tratando a
+Terra como esfera — dez vezes menos que o GPS que alimenta a conta.
+
+**Em aberto.** Uma loja que tenta repetidamente declarar entrega do lugar errado é
+um padrão que a governança gostaria de ver. Não está registrado, porque não há
+como distinguir isso de um aparelho com GPS ruim sem dados que o sistema não tem.
+
+---
+
+## 28. Quebra de protocolo: o que conta, o que não conta, e por quê
+
+**Decisão.** Quatro espécies de quebra, todas derivadas de prazo vencido:
+`RECALL_SLA`, `PICKUP_NOT_COLLECTED`, `DROPOFF_NOT_ACKNOWLEDGED`,
+`TRANSFER_ABANDONED`. Três na janela móvel de 12 meses suspendem o **pátio**.
+
+**Por quê.** "Três quebras suspendem" só vira regra se quebra for algo medido sem
+opinião. Julgamento humano sobre quem falhou seria um tribunal entre
+concorrentes. Os três critérios — objetiva, atribuível, já medida — não são
+descrição, são o filtro que definiu a lista.
+
+**O que ficou de fora, e é a parte mais importante da decisão.**
+
+*Divergência de vistoria não é quebra de protocolo.* É dano, e o produto
+deliberadamente não arbitra dano — registra a divergência e deixa as duas lojas
+conversarem. Contá-la como quebra transformaria o registro objetivo numa acusação
+automática, e o efeito prático seria o oposto do pretendido: a primeira loja a
+marcar um risco no termo aprenderia a não marcar mais. O registro perderia
+exatamente a honestidade que o justifica.
+
+*Pátio, não empresa.* Quem quebrou o protocolo foi aquele pátio. Derrubar a
+matriz porque a filial atrasou três entregas puniria quem não fez nada.
+Inadimplência é o caso oposto — lá o contrato é da empresa — e é por isso que os
+dois status existem separados.
+
+**A janela é móvel.** Uma quebra por ano durante três anos é um problema
+diferente de três num mês; contagem vitalícia transformaria toda loja antiga em
+candidata a suspensão por acúmulo lento. E o pátio **reabre sozinho** quando a
+janela alivia: manter a suspensão exigiria alguém decidir mantê-la, e essa
+decisão não está em nenhuma regra que a praça combinou. Punição que depende de
+alguém lembrar de tirar vira permanente.
+
+**Idempotência não é detalhe de persistência.** O varredor roda a cada minuto
+sobre os mesmos termos vencidos. Sem o id determinístico de `breachIdFor`, um
+único atraso viraria sessenta quebras por hora e suspenderia a praça inteira
+antes do almoço. `occurredAt` também fica congelado na primeira detecção — se
+fosse atualizado a cada passe, a quebra nunca sairia da janela e a suspensão
+seria perpétua. Uma mutação que removeu a checagem de existência falha o teste
+que roda a varredura vinte vezes.
+
+---
+
+## 29. Desligamento: entrar é discricionário, sair é probatório
+
+**Decisão.** Moção de desligamento só pode ser aberta contra empresa com
+reincidência registrada (segunda suspensão por conduta). Carrega com dois terços
+das fundadoras ativas, excluída a acusada, piso de duas. Sem voto contra, com
+prazo, e o desfecho por inércia é *fica*.
+
+**Por quê.** A admissão recusou o endosso contrário para não dar a cada fundadora
+um veto sobre concorrência direta. O desligamento reabre essa porta por outro
+lado: se bastasse convencer colegas, seria o mesmo veto com mais passos — e com a
+agravante de servir contra quem está vendendo bem, que é justamente quem
+incomoda.
+
+O que fecha a porta é a exigência de **fato**. Opinião decide quem entra; registro
+decide quem *pode* ser posto para fora. E o fundamento é apurado do registro pelo
+serviço, não informado por quem abre: deixar a proponente declarar a reincidência
+transformaria a guarda em formalidade, porque quem quer desligar um concorrente
+também sabe digitar "2".
+
+**Quórum proporcional, ao contrário dos três endossos.** Não é incoerência: são
+grandezas diferentes. Na admissão mede-se confiança, e três lojas respondendo por
+uma quarta é uma unidade que não deve encolher porque a praça é pequena. No
+desligamento mede-se consenso da rede sobre expulsar alguém, e consenso é
+proporção. Maioria simples decidiria com um voto de diferença; unanimidade daria
+a qualquer fundadora o veto que se quer evitar — bastaria calar-se.
+
+**Sem voto contra, e com prazo.** O silêncio já é contra, então registrar "sou
+contra" não acrescenta informação e tornaria visível quem defendeu quem — que é
+como se constrói retaliação entre concorrentes. E o prazo é o que garante que o
+desfecho por inércia seja *fica*: se "sai" fosse o default do silêncio, bastaria
+abrir moções e esperar.
+
+**A custódia não bloqueia o desligamento.** Se estar com o carro de um parceiro
+adiasse a saída, bastaria segurar um carro para nunca ser desligado — o refém
+viraria escudo. As obrigações sobrevivem, e a lista de veículos ainda em poder da
+empresa desligada vai no evento, para cada dona saber no mesmo instante o que
+precisa chamar de volta. Desligar sem dizer isso criaria um carro órfão por
+decisão de governança.
+
+**Em aberto.** Saída voluntária. Uma empresa que quer sair da rede por vontade
+própria não tem caminho — e não deveria usar o de desligamento, que é sanção. É
+um fluxo diferente (aviso prévio, devolução de custódia, encerramento de
+cobrança) e projetá-lo agora, sem um caso real, produziria a regra errada.
+
+---
+
+## 30. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

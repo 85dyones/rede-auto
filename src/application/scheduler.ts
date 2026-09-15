@@ -1,11 +1,13 @@
 /**
  * Varredor periodico.
  *
- * Tres coisas dependem apenas da passagem do tempo e precisam acontecer mesmo
+ * Quatro coisas dependem apenas da passagem do tempo e precisam acontecer mesmo
  * sem ninguem mexer no sistema:
  *   - a trava que venceu (o carro voltou a ficar disponivel para a rede);
  *   - o SLA de recall que estourou;
- *   - a mensalidade do ciclo, e a suspensao de quem passou dos 30 dias.
+ *   - a mensalidade do ciclo, e a suspensao de quem passou dos 30 dias;
+ *   - a quebra de protocolo de entrega ou retirada, a suspensao de quem chegou
+ *     a tres na janela de 12 meses, e a reabertura de quem a janela ja aliviou.
  *
  * As duas primeiras sao avisos: a leitura de qualquer veiculo ja reconcilia a
  * trava sozinha, entao ali o varredor garante PONTUALIDADE, nao correcao.
@@ -21,12 +23,18 @@ import type { AppContext } from './context.ts';
 import { sweepExpiredLocks } from './inventory-service.ts';
 import { sweepRecallBreaches } from './custody-service.ts';
 import { runBillingSweep } from './billing-service.ts';
+import { runConductSweep } from './conduct-service.ts';
+import { sweepLapsedMotions } from './governance-service.ts';
 
 export type SweepResult = {
   readonly expiredLocks: number;
   readonly breachedRecalls: number;
   readonly chargesIssued: number;
   readonly membersSuspended: number;
+  readonly breachesRecorded: number;
+  readonly storesSuspended: number;
+  readonly storesReopened: number;
+  readonly motionsLapsed: number;
 };
 
 export async function runSweep(context: AppContext): Promise<SweepResult> {
@@ -37,13 +45,37 @@ export async function runSweep(context: AppContext): Promise<SweepResult> {
   // fronteira, faturamento inclusive.
   let chargesIssued = 0;
   let membersSuspended = 0;
+  let breachesRecorded = 0;
+  let storesSuspended = 0;
+  let storesReopened = 0;
+  let motionsLapsed = 0;
+
   for (const cluster of await context.repos.clusters.all()) {
     const billing = await runBillingSweep(context, cluster.id);
     chargesIssued += billing.issued;
     membersSuspended += billing.suspended;
+
+    // Depois do recall: `sweepRecallBreaches` acabou de marcar os SLAs
+    // estourados, e e deles que sai a quebra de conduta. Rodar antes deixaria
+    // toda quebra de SLA para o passe seguinte.
+    const conduct = await runConductSweep(context, cluster.id);
+    breachesRecorded += conduct.recorded;
+    storesSuspended += conduct.suspended;
+    storesReopened += conduct.reopened;
+
+    motionsLapsed += await sweepLapsedMotions(context, cluster.id);
   }
 
-  return { expiredLocks, breachedRecalls, chargesIssued, membersSuspended };
+  return {
+    expiredLocks,
+    breachedRecalls,
+    chargesIssued,
+    membersSuspended,
+    breachesRecorded,
+    storesSuspended,
+    storesReopened,
+    motionsLapsed,
+  };
 }
 
 export type Sweeper = { stop(): void };

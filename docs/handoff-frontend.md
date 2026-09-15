@@ -1,7 +1,7 @@
 # Handoff de frontend — rede-auto
 
 **Para:** Claude Design · **De:** time de backend · **Status:** API implementada e
-testada (475 testes), frontend inexistente.
+testada (531 testes), frontend inexistente.
 
 Este documento é o briefing para a proposta visual. Tudo aqui está ancorado no
 contrato real da API — os JSON citados são respostas de verdade, capturadas do
@@ -665,7 +665,7 @@ Coisas que parecem boas ideias e quebram o produto:
 | Um único badge de status por veículo | mente sobre os dois eixos (seção 3) |
 | Preço líquido em qualquer superfície voltada ao consumidor | destrói o modelo da rede |
 | Contador regressivo cru para o SLA | ignora horas úteis (P6) |
-| Avaliação/rating entre lojas | governança aqui é endosso de fundadoras, não reputação social |
+| Avaliação/rating entre lojas | governança aqui é endosso de fundadoras, não reputação social. O registro de conduta é objetivo (prazos vencidos) e alimenta governança, nunca o catálogo |
 | Notificação para toda trava aberta | afogaria os avisos que exigem ação |
 
 ---

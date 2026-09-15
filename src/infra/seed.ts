@@ -80,17 +80,21 @@ const PILOT_CLUSTER_SLUG = 'curitiba-rmc';
 
 // A Sul Car entra como CASH_ONLY de proposito: sem uma loja assim, o piloto
 // nunca exercita o caminho que este campo existe para cobrir.
+//
+// As coordenadas sao dos centros dos municipios, e nao de enderecos reais: o
+// que o piloto precisa e que as dez fiquem a distancias plausiveis umas das
+// outras, para a conferencia da entrega (raio de 500 m) ter o que rejeitar.
 const FOUNDERS = [
-  { slug: 'prime', tradeName: 'Prime Motors', city: 'Curitiba', state: 'PR', cnpj: '11222333000181', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'veloz', tradeName: 'Veloz Seminovos', city: 'Sao Jose dos Pinhais', state: 'PR', cnpj: '04252011000110', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'central', tradeName: 'Garagem Central', city: 'Curitiba', state: 'PR', cnpj: '34028316000103', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Colombo', state: 'PR', cnpj: '33000167000101', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'sul', tradeName: 'Sul Car', city: 'Araucaria', state: 'PR', cnpj: '60746948000112', tradeInDefault: TradeInStance.CASH_ONLY },
-  { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Pinhais', state: 'PR', cnpj: '47960950000121', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'planalto', tradeName: 'Planalto Veiculos', city: 'Campo Largo', state: 'PR', cnpj: '19283746000188', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'atlas', tradeName: 'Atlas Automoveis', city: 'Curitiba', state: 'PR', cnpj: '28574639000108', tradeInDefault: TradeInStance.CONSIDERS },
-  { slug: 'iguacu', tradeName: 'Iguacu Motors', city: 'Piraquara', state: 'PR', cnpj: '37615284000130', tradeInDefault: TradeInStance.CASH_ONLY },
-  { slug: 'bandeirante', tradeName: 'Bandeirante Seminovos', city: 'Fazenda Rio Grande', state: 'PR', cnpj: '41962853000191', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'prime', tradeName: 'Prime Motors', city: 'Curitiba', state: 'PR', cnpj: '11222333000181', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.4284, lng: -49.2733 } },
+  { slug: 'veloz', tradeName: 'Veloz Seminovos', city: 'Sao Jose dos Pinhais', state: 'PR', cnpj: '04252011000110', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.5307, lng: -49.2064 } },
+  { slug: 'central', tradeName: 'Garagem Central', city: 'Curitiba', state: 'PR', cnpj: '34028316000103', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.4372, lng: -49.2695 } },
+  { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Colombo', state: 'PR', cnpj: '33000167000101', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.2917, lng: -49.2242 } },
+  { slug: 'sul', tradeName: 'Sul Car', city: 'Araucaria', state: 'PR', cnpj: '60746948000112', tradeInDefault: TradeInStance.CASH_ONLY, yard: { lat: -25.5925, lng: -49.4103 } },
+  { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Pinhais', state: 'PR', cnpj: '47960950000121', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.4447, lng: -49.1925 } },
+  { slug: 'planalto', tradeName: 'Planalto Veiculos', city: 'Campo Largo', state: 'PR', cnpj: '19283746000188', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.4592, lng: -49.5278 } },
+  { slug: 'atlas', tradeName: 'Atlas Automoveis', city: 'Curitiba', state: 'PR', cnpj: '28574639000108', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.4809, lng: -49.3003 } },
+  { slug: 'iguacu', tradeName: 'Iguacu Motors', city: 'Piraquara', state: 'PR', cnpj: '37615284000130', tradeInDefault: TradeInStance.CASH_ONLY, yard: { lat: -25.4419, lng: -49.0628 } },
+  { slug: 'bandeirante', tradeName: 'Bandeirante Seminovos', city: 'Fazenda Rio Grande', state: 'PR', cnpj: '41962853000191', tradeInDefault: TradeInStance.CONSIDERS, yard: { lat: -25.6625, lng: -49.3078 } },
 ] as const;
 
 const DEMO_VEHICLES = [
@@ -230,6 +234,7 @@ export async function seedFoundingNetwork(
       phone: `4132${String(index).padStart(2, '0')}4455`,
       email: `contato@${founder.slug}.com.br`,
       responsibleName: `Titular ${founder.tradeName}`,
+      yard: founder.yard,
     };
 
     // Uma empresa por fundadora, com um patio. A Prime ganha um segundo patio
@@ -309,6 +314,9 @@ export async function seedFoundingNetwork(
       // Mesma raiz, ordem diferente: e assim que filial se identifica no Brasil.
       cnpj: '11222333000262',
       city: 'Curitiba',
+      // Boqueirao, ~6 km da matriz no centro. Longe o bastante para uma entrega
+      // declarada num patio nao passar na conferencia do outro.
+      yard: { lat: -25.4890, lng: -49.2450 },
     },
     status: StoreStatus.ACTIVE,
     joinedAt: now,

@@ -13,7 +13,9 @@ import type {
   ClusterId,
   CustodyTransferId,
   DealId,
+  BreachId,
   ChargeId,
+  MotionId,
   LockId,
   MemberId,
   RecallId,
@@ -27,6 +29,8 @@ import type { Cluster } from '../../domain/cluster/cluster.ts';
 import type { NetworkUser, Store } from '../../domain/network/store.ts';
 import type { Member } from '../../domain/network/member.ts';
 import type { Charge } from '../../domain/billing/charge.ts';
+import type { Breach } from '../../domain/conduct/breach.ts';
+import type { ExpulsionMotion } from '../../domain/network/expulsion.ts';
 import type { MembershipApplication } from '../../domain/network/membership.ts';
 import type { Vehicle } from '../../domain/vehicle/vehicle.ts';
 import { CommercialStatus } from '../../domain/vehicle/vehicle.ts';
@@ -142,6 +146,27 @@ export type CustodyTransferRepository = {
   byId(id: CustodyTransferId): Promise<CustodyTransfer | undefined>;
   byVehicle(vehicleId: VehicleId): Promise<CustodyTransfer[]>;
   openByVehicle(vehicleId: VehicleId): Promise<CustodyTransfer | undefined>;
+  /**
+   * Termos que ainda esperam alguma coisa: em transito ou entregues sem aceite.
+   * Base do varredor de conduta — sao exatamente os dois estados em que um
+   * prazo de protocolo pode estourar.
+   */
+  allPending(): Promise<CustodyTransfer[]>;
+};
+
+export type MotionRepository = {
+  save(motion: ExpulsionMotion): Promise<void>;
+  byId(id: MotionId): Promise<ExpulsionMotion | undefined>;
+  openInCluster(clusterId: ClusterId): Promise<ExpulsionMotion[]>;
+  againstMember(memberId: MemberId): Promise<ExpulsionMotion[]>;
+};
+
+export type BreachRepository = {
+  save(breach: Breach): Promise<void>;
+  byId(id: BreachId): Promise<Breach | undefined>;
+  byStore(storeId: StoreId): Promise<Breach[]>;
+  byMember(memberId: MemberId): Promise<Breach[]>;
+  byCluster(clusterId: ClusterId): Promise<Breach[]>;
 };
 
 export type RecallRepository = {
@@ -197,6 +222,8 @@ export type Repositories = {
   readonly vehicles: VehicleRepository;
   readonly locks: LockRepository;
   readonly transfers: CustodyTransferRepository;
+  readonly breaches: BreachRepository;
+  readonly motions: MotionRepository;
   readonly recalls: RecallRepository;
   readonly deals: DealRepository;
   readonly audit: AuditRepository;
@@ -457,6 +484,65 @@ class InMemoryCustodyTransferRepository implements CustodyTransferRepository {
     }
     return undefined;
   }
+  async allPending(): Promise<CustodyTransfer[]> {
+    return [...this.#byId.values()]
+      .filter((transfer) => transfer.status === 'OPEN' || transfer.status === 'DROPPED_OFF')
+      .sort((a, b) => a.openedAt - b.openedAt)
+      .map(clone);
+  }
+}
+
+class InMemoryMotionRepository implements MotionRepository {
+  readonly #byId = new Map<string, ExpulsionMotion>();
+
+  async save(motion: ExpulsionMotion): Promise<void> {
+    this.#byId.set(motion.id, clone(motion));
+  }
+  async byId(id: MotionId): Promise<ExpulsionMotion | undefined> {
+    const found = this.#byId.get(id);
+    return found === undefined ? undefined : clone(found);
+  }
+  async openInCluster(clusterId: ClusterId): Promise<ExpulsionMotion[]> {
+    return [...this.#byId.values()]
+      .filter((motion) => motion.clusterId === clusterId && motion.status === 'OPEN')
+      .map(clone);
+  }
+  async againstMember(memberId: MemberId): Promise<ExpulsionMotion[]> {
+    return [...this.#byId.values()]
+      .filter((motion) => motion.memberId === memberId)
+      .sort((a, b) => a.openedAt - b.openedAt)
+      .map(clone);
+  }
+}
+
+class InMemoryBreachRepository implements BreachRepository {
+  readonly #byId = new Map<string, Breach>();
+
+  async save(breach: Breach): Promise<void> {
+    this.#byId.set(breach.id, clone(breach));
+  }
+  async byId(id: BreachId): Promise<Breach | undefined> {
+    const found = this.#byId.get(id);
+    return found === undefined ? undefined : clone(found);
+  }
+  async byStore(storeId: StoreId): Promise<Breach[]> {
+    return [...this.#byId.values()]
+      .filter((breach) => breach.storeId === storeId)
+      .sort((a, b) => a.occurredAt - b.occurredAt)
+      .map(clone);
+  }
+  async byMember(memberId: MemberId): Promise<Breach[]> {
+    return [...this.#byId.values()]
+      .filter((breach) => breach.memberId === memberId)
+      .sort((a, b) => a.occurredAt - b.occurredAt)
+      .map(clone);
+  }
+  async byCluster(clusterId: ClusterId): Promise<Breach[]> {
+    return [...this.#byId.values()]
+      .filter((breach) => breach.clusterId === clusterId)
+      .sort((a, b) => a.occurredAt - b.occurredAt)
+      .map(clone);
+  }
 }
 
 class InMemoryRecallRepository implements RecallRepository {
@@ -591,6 +677,8 @@ export function createInMemoryRepositories(): Repositories {
     vehicles: new InMemoryVehicleRepository(),
     locks: new InMemoryLockRepository(),
     transfers: new InMemoryCustodyTransferRepository(),
+    breaches: new InMemoryBreachRepository(),
+    motions: new InMemoryMotionRepository(),
     recalls: new InMemoryRecallRepository(),
     deals: new InMemoryDealRepository(),
     audit: new InMemoryAuditRepository(),
