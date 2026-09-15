@@ -11,6 +11,7 @@
 import { type Result, err, ok } from '../domain/shared/result.ts';
 import type { DomainError } from '../domain/shared/errors.ts';
 import { forbiddenError, notFoundError } from '../domain/shared/errors.ts';
+import { memberInGoodStanding } from '../domain/network/member.ts';
 import type { DomainEvent } from '../domain/shared/events.ts';
 import type { Instant } from '../domain/shared/clock.ts';
 import {
@@ -87,6 +88,24 @@ export async function startCustodyTransfer(
   const destination = await context.repos.stores.byId(input.toStoreId);
   if (destination === undefined) {
     return err(forbiddenError('DESTINATION_NOT_IN_NETWORK', 'A loja de destino nao pertence a rede.'));
+  }
+
+  // Empresa de saida nao recebe carro novo. Devolver o que ela ja tem continua
+  // valendo — bloquear isso prenderia o carro de terceiro no patio de quem esta
+  // saindo, e a devolucao e justamente o que precisa acontecer.
+  const destinationMember = await context.repos.members.byId(destination.memberId);
+  const devolucaoParaDona = input.toStoreId === loaded.value.vehicle.ownerStoreId;
+  if (
+    !devolucaoParaDona &&
+    (destinationMember === undefined || !memberInGoodStanding(destinationMember))
+  ) {
+    return err(
+      forbiddenError(
+        'DESTINATION_NOT_ACCEPTING_CUSTODY',
+        'A loja de destino nao esta recebendo custodia: a empresa dela esta suspensa ou de saida.',
+        { storeId: destination.id, memberStatus: destinationMember?.status ?? null },
+      ),
+    );
   }
 
   // Se o retorno atende um recall aberto, o termo ja nasce vinculado a ele.

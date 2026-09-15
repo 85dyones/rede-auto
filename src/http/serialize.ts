@@ -24,6 +24,8 @@ import type { Charge } from '../domain/billing/charge.ts';
 import { type Breach, describeBreach } from '../domain/conduct/breach.ts';
 import type { ExpulsionMotion, SupportTally } from '../domain/network/expulsion.ts';
 import type { ConductView } from '../application/conduct-service.ts';
+import { describeExitBlocker } from '../domain/network/exit.ts';
+import type { ExitView } from '../application/exit-service.ts';
 import type { BillingStatement } from '../application/billing-service.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
 import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
@@ -641,5 +643,29 @@ export function motionDto(motion: ExpulsionMotion, tally: SupportTally, expelled
       justificativa: support.note,
     })),
     empresaDesligada: expelled === null ? null : expelled.id,
+  };
+}
+
+/**
+ * O checklist de saida. `pendencias` sai como lista de codigos COM descricao:
+ * a tela precisa poder marcar cada item, e o lojista precisa entender cada um
+ * sem ligar para o suporte.
+ */
+export function exitDto(view: ExitView) {
+  const r = view.readiness;
+  return {
+    situacao: view.member.status,
+    avisadoEm: instant(r.noticeGivenAt),
+    prazoTerminaEm: instant(r.noticePeriodEndsAt),
+    prazoCumprido: r.noticeServed,
+    podeSair: r.clear,
+    pendencias: r.blockers.map((code) => ({ codigo: code, descricao: describeExitBlocker(code) })),
+    contagens: {
+      carrosDeTerceirosNoSeuPatio: r.holdingOthersVehicles,
+      carrosSeusEmPatioAlheio: r.vehiclesHeldByOthers,
+      travasAbertas: r.openLocks,
+      negociacoesAbertas: r.openDeals,
+      cobrancasEmAberto: money({ currency: 'BRL', cents: r.outstandingChargeCents }),
+    },
   };
 }

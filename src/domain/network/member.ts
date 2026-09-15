@@ -57,6 +57,15 @@ export const MemberStatus = {
    * terceiro no patio nao vira refem de uma fatura.
    */
   SUSPENDED: 'SUSPENDED',
+  /**
+   * Avisou que vai sair e esta encerrando.
+   *
+   * Nao adquire exposicao NOVA — nao trava carro alheio, nao recebe custodia,
+   * nao apresenta nem endossa candidata — mas termina tudo que ja estava
+   * aberto. Bloquear o encerramento prenderia o carro de terceiro no patio de
+   * quem esta de saida, que e o oposto do que se quer. Ver `exit.ts`.
+   */
+  LEAVING: 'LEAVING',
   /** Saiu ou foi desligada. Historico preservado. */
   EXITED: 'EXITED',
 } as const;
@@ -93,6 +102,14 @@ export type Member = {
    * responde, e a copia so serviria para divergir do original.
    */
   readonly tariffVersion: string;
+  /**
+   * Quando a empresa avisou que vai sair. `null` enquanto nao avisou.
+   *
+   * O aviso e um instante guardado, e nao um estado derivado, porque dele sai o
+   * prazo — e porque desistir precisa poder apagar o aviso sem apagar o
+   * historico do que aconteceu no meio.
+   */
+  readonly exitNoticeAt: Instant | null;
 };
 
 /** Os 8 primeiros digitos de um CNPJ ja validado. */
@@ -143,6 +160,7 @@ export function memberFromFirstStore(
     joinedAt,
     sponsorMemberId,
     tariffVersion,
+    exitNoticeAt: null,
   };
 }
 
@@ -192,9 +210,22 @@ export function isFoundingMemberOf(member: Member, clusterId: ClusterId): boolea
   return isFoundingMember(member) && member.clusterId === clusterId;
 }
 
-/** A empresa esta em dia com o contrato? Nada a ver com o patio estar aberto. */
+/**
+ * A empresa esta em dia com o contrato? Nada a ver com o patio estar aberto.
+ *
+ * `LEAVING` responde falso, e e o mecanismo que impede a empresa de saida de
+ * adquirir exposicao nova: `canTransact` passa por aqui, entao trava comercial,
+ * apadrinhamento e endosso param sozinhos, sem regra nova em cada lugar. O que
+ * nao passa por `canTransact` — check-in, devolucao, recall, liquidacao — segue
+ * funcionando, que e exatamente o encerramento que ela precisa fazer.
+ */
 export function memberInGoodStanding(member: Member): boolean {
   return member.status === MemberStatus.ACTIVE;
+}
+
+/** A empresa avisou saida e esta encerrando? */
+export function isLeaving(member: Member): boolean {
+  return member.status === MemberStatus.LEAVING;
 }
 
 export function describeMember(member: Member): string {

@@ -16,7 +16,7 @@ usuário)** — o papel do usuário decide o que ele pode fazer.
 plataforma, e não há superfície voltada a ele.
 
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
-> [`decisoes.md`](decisoes.md#30-o-que-ficou-de-fora-e-por-quê).
+> [`decisoes.md`](decisoes.md#31-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
@@ -244,6 +244,45 @@ ela, o lojista vê "3 de 3" e não sabe que a contagem anda sozinha para trás.
 
 As quatro espécies de quebra e o que ficou de fora estão em
 [`decisoes.md`](decisoes.md#28-quebra-de-protocolo-o-que-conta-o-que-não-conta-e-por-quê).
+
+### `GET /api/v1/saida` · `POST /api/v1/saida` · `DELETE /api/v1/saida`
+
+O checklist de saída da sua empresa, o aviso prévio e a desistência. O `GET`
+funciona **antes** de avisar: quem pensa em sair precisa ver o que teria de
+encerrar antes de decidir.
+
+```jsonc
+{
+  "situacao": "LEAVING",
+  "avisadoEm": "2026-08-24T…",
+  "prazoTerminaEm": "2026-09-23T…",
+  "prazoCumprido": false,
+  "podeSair": false,
+  "pendencias": [
+    { "codigo": "AVISO_EM_CURSO", "descricao": "o aviso previo ainda esta correndo" },
+    { "codigo": "CUSTODIA_DE_TERCEIROS", "descricao": "ha carro de outra loja no seu patio" }
+  ],
+  "contagens": {
+    "carrosDeTerceirosNoSeuPatio": 1,
+    "carrosSeusEmPatioAlheio": 0,
+    "travasAbertas": 0,
+    "negociacoesAbertas": 0,
+    "cobrancasEmAberto": { "centavos": 0, "formatado": "R$ 0,00" }
+  }
+}
+```
+
+Cada pendência vem **com descrição**: a tela não deve traduzir código, e "você
+não pode sair" sem o motivo transformaria a saída num muro.
+
+Só o **titular** avisa ou desiste (`403 NOT_A_PRINCIPAL` para vendedor). Não há
+rota de "sair agora": a saída se conclui sozinha no passe em que a última
+pendência fechar.
+
+Enquanto `LEAVING`, a empresa recebe `403 STORE_NOT_ACTIVE` ao travar carro da
+rede e `403 DESTINATION_NOT_ACCEPTING_CUSTODY` quando alguém tenta enviar um
+carro para os pátios dela — mas **devolver o carro dela** continua permitido, que
+é justamente o que ela precisa fazer.
 
 ### `POST /api/v1/desligamentos`
 

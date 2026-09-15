@@ -6,7 +6,8 @@
  * porque as fundadoras ja responderam pela empresa.
  */
 
-import { notFoundError } from '../../domain/shared/errors.ts';
+import { forbiddenError, notFoundError } from '../../domain/shared/errors.ts';
+import { UserRole } from '../../domain/network/store.ts';
 import { asApplicationId, asChargeId, asMemberId, asMotionId } from '../../domain/shared/ids.ts';
 import type { AppContext } from '../../application/context.ts';
 import type { ApplicationView } from '../../application/governance-service.ts';
@@ -15,6 +16,7 @@ import {
   registerChargePayment,
 } from '../../application/billing-service.ts';
 import { memberConduct } from '../../application/conduct-service.ts';
+import { cancelExit, exitStatus, requestExit } from '../../application/exit-service.ts';
 import {
   openExpulsion,
   supportExpulsionMotion,
@@ -32,6 +34,7 @@ import {
   chargeDto,
   clusterDto,
   conductDto,
+  exitDto,
   memberDto,
   motionDto,
   statementDto,
@@ -173,6 +176,59 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
       cobranca: chargeDto(result.value.charge),
       empresaReativada: result.value.reinstated === null ? null : result.value.reinstated.id,
     });
+  });
+
+  /**
+   * O checklist de saida da SUA empresa. Disponivel antes de avisar: quem
+   * pensa em sair precisa ver o que teria de encerrar antes de decidir.
+   */
+  router.get('/api/v1/saida', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const result = await exitStatus(context, actor.value.member.id);
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(200, exitDto(result.value));
+  });
+
+  /**
+   * Avisa que vai sair. So o titular: sair e decisao de contrato, nao operacao
+   * de patio. A saida se conclui sozinha quando a ultima pendencia fechar —
+   * nao ha botao final que alguem precise lembrar de apertar.
+   */
+  router.post('/api/v1/saida', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+    if (actor.value.user.role !== UserRole.PRINCIPAL) {
+      return errorResponse(
+        forbiddenError('NOT_A_PRINCIPAL', 'Somente o titular avisa saida da rede.', {
+          role: actor.value.user.role,
+        }),
+        request.requestId,
+      );
+    }
+
+    const result = await requestExit(context, actor.value);
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(201, exitDto(result.value));
+  });
+
+  /** Desiste de sair. Nada foi destruido no caminho, entao a volta e limpa. */
+  router.delete('/api/v1/saida', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+    if (actor.value.user.role !== UserRole.PRINCIPAL) {
+      return errorResponse(
+        forbiddenError('NOT_A_PRINCIPAL', 'Somente o titular desiste da saida.', {
+          role: actor.value.user.role,
+        }),
+        request.requestId,
+      );
+    }
+
+    const result = await cancelExit(context, actor.value);
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+    return json(200, exitDto(result.value));
   });
 
   /**

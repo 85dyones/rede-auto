@@ -21,7 +21,7 @@ import { notFoundError } from '../domain/shared/errors.ts';
 import { asChargeId, type ChargeId, type ClusterId, type MemberId } from '../domain/shared/ids.ts';
 import type { Instant } from '../domain/shared/clock.ts';
 import type { Money } from '../domain/shared/money.ts';
-import { type Member, reinstate, suspendForArrears } from '../domain/network/member.ts';
+import { type Member, MemberStatus, reinstate, suspendForArrears } from '../domain/network/member.ts';
 import {
   type Charge,
   ChargeKind,
@@ -195,6 +195,12 @@ export async function runBillingSweep(
   let suspended = 0;
 
   for (const member of members) {
+    // Quem saiu nao e faturado. Sem isto a empresa desligada acumularia
+    // mensalidade para sempre, e o varredor tentaria suspender quem ja saiu.
+    // Quem esta SAINDO continua sendo: ainda usa a rede para encerrar, e a
+    // cobranca em aberto e justamente uma das comportas da saida.
+    if (member.status === MemberStatus.EXITED) continue;
+
     const charges = await context.repos.charges.byMember(member.id);
     const emitidas = charges
       .filter((charge) => charge.kind === ChargeKind.MONTHLY)

@@ -740,7 +740,71 @@ cobrança) e projetá-lo agora, sem um caso real, produziria a regra errada.
 
 ---
 
-## 30. O que ficou de fora, e por quê
+## 30. Saída voluntária: o prazo é o mínimo, não o gatilho
+
+**Decisão.** Aviso prévio de 30 dias **e** estado limpo — nenhum carro de
+terceiro no pátio dela, nenhum carro dela em pátio alheio, nenhuma trava,
+negociação ou cobrança viva. As duas comportas precisam abrir. Entre o aviso e a
+saída a empresa fica em `LEAVING`. A conclusão é automática.
+
+**Por quê.** Saída é decisão de quem sai: ninguém vota, ninguém precisa
+concordar, e não há nada a provar — o oposto exato do desligamento, e por isso um
+fluxo separado. Mas ela não pode ser instantânea, e a razão não é burocrática: no
+instante em que a empresa deixa a rede, todo carro que ela ainda detiver fica
+**sem contraparte**. Não há mais recall a pedir nem prazo a cobrar. O livro de
+custódia continuaria dizendo quem está com o quê, e não haveria mais rede para
+resolver.
+
+**A comporta de estado não é uma data, e é a que importa.** Prazo vencido não
+basta: a empresa não sai enquanto estiver com o carro de alguém. Uma mutação que
+removeu as duas contagens de custódia falha quatro testes.
+
+E as duas contagens são **simétricas**: carro de terceiro no pátio dela *e* carro
+dela em pátio alheio. As duas deixam um veículo órfão depois da saída.
+
+**`LEAVING` cai fora de graça.** `memberInGoodStanding` responde falso, e é por
+ele que `canTransact` passa — então trava, apadrinhamento e endosso param
+sozinhos, sem regra nova em cada lugar. O que não passa por `canTransact`
+(check-in, devolução, recall, liquidação) segue funcionando, que é exatamente o
+encerramento que ela precisa fazer. Bloquear tudo prenderia o carro de terceiro
+no pátio de quem está saindo.
+
+Uma guarda teve de ser escrita à mão: o destino de um transporte novo. Um pátio
+de empresa em saída **não recebe** carro novo — exceto a devolução do próprio
+carro para a dona, que é o caso que não pode ser bloqueado.
+
+**A conclusão é automática, e isso não é conveniência.** A última pendência
+costuma fechar por um ato de *outra* loja: o aceite de uma devolução, a liquidação
+de uma negociação. Quem está saindo não tem como saber a hora exata, e um botão
+final deixaria a empresa pronta e presa, esperando alguém reparar — descoberto na
+próxima fatura.
+
+**Consequências laterais.**
+
+- Faturamento para em `EXITED`, não em `LEAVING`: quem está saindo ainda usa a
+  rede para encerrar, e a cobrança em aberto é uma das comportas. Sem parar em
+  `EXITED`, a empresa acumularia mensalidade para sempre e o varredor tentaria
+  suspender quem já saiu.
+- Empresa **suspensa** pode avisar saída. Impedir faria da suspensão uma
+  armadilha: presa a uma rede em que não opera, acumulando mensalidade. Ela ainda
+  vai ter de quitar para sair.
+- As candidaturas que ela apadrinhou são retiradas junto. A candidata perdeu quem
+  respondia por ela, e deixá-la pendurada até caducar seria 30 dias de silêncio
+  sobre um fato que já se sabe.
+- O rol de fundadoras encolhe sozinho — porque ele é contado, nunca declarado.
+  `endorsementTally` e `requiredSupport` se ajustam sem nenhuma linha nova.
+
+**Descartado.** Concluir a saída na data, ignorando pendências. É o desenho
+óbvio, e ele cria exatamente o carro órfão que a rede não tem como resolver.
+
+**Descartado também**: bloquear a saída de quem tem conduta em aberto ou moção de
+desligamento correndo. Sair não é fuga — a sanção existe para proteger a operação
+da rede, e quem saiu já não opera nela. Prender o infrator dentro da rede seria
+manter o problema em vez de resolvê-lo.
+
+---
+
+## 31. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

@@ -7,7 +7,8 @@
  *   - o SLA de recall que estourou;
  *   - a mensalidade do ciclo, e a suspensao de quem passou dos 30 dias;
  *   - a quebra de protocolo de entrega ou retirada, a suspensao de quem chegou
- *     a tres na janela de 12 meses, e a reabertura de quem a janela ja aliviou.
+ *     a tres na janela de 12 meses, e a reabertura de quem a janela ja aliviou;
+ *   - a saida voluntaria cuja ultima pendencia fechou.
  *
  * As duas primeiras sao avisos: a leitura de qualquer veiculo ja reconcilia a
  * trava sozinha, entao ali o varredor garante PONTUALIDADE, nao correcao.
@@ -25,6 +26,7 @@ import { sweepRecallBreaches } from './custody-service.ts';
 import { runBillingSweep } from './billing-service.ts';
 import { runConductSweep } from './conduct-service.ts';
 import { sweepLapsedMotions } from './governance-service.ts';
+import { sweepCompletedExits } from './exit-service.ts';
 
 export type SweepResult = {
   readonly expiredLocks: number;
@@ -35,6 +37,7 @@ export type SweepResult = {
   readonly storesSuspended: number;
   readonly storesReopened: number;
   readonly motionsLapsed: number;
+  readonly exitsCompleted: number;
 };
 
 export async function runSweep(context: AppContext): Promise<SweepResult> {
@@ -49,6 +52,7 @@ export async function runSweep(context: AppContext): Promise<SweepResult> {
   let storesSuspended = 0;
   let storesReopened = 0;
   let motionsLapsed = 0;
+  let exitsCompleted = 0;
 
   for (const cluster of await context.repos.clusters.all()) {
     const billing = await runBillingSweep(context, cluster.id);
@@ -64,6 +68,11 @@ export async function runSweep(context: AppContext): Promise<SweepResult> {
     storesReopened += conduct.reopened;
 
     motionsLapsed += await sweepLapsedMotions(context, cluster.id);
+
+    // Por ultimo: a ultima pendencia de uma saida costuma fechar por um ato
+    // que acabou de acontecer neste mesmo passe — uma cobranca quitada, uma
+    // devolucao aceita. Rodar antes adiaria a saida em um ciclo inteiro.
+    exitsCompleted += await sweepCompletedExits(context, cluster.id);
   }
 
   return {
@@ -75,6 +84,7 @@ export async function runSweep(context: AppContext): Promise<SweepResult> {
     storesSuspended,
     storesReopened,
     motionsLapsed,
+    exitsCompleted,
   };
 }
 

@@ -1138,6 +1138,85 @@ describe('conduta e desligamento', () => {
   });
 });
 
+describe('saida voluntaria', () => {
+  test('o checklist aparece antes de avisar, com o que teria de encerrar', async () => {
+    const response = await api<{
+      situacao: string;
+      podeSair: boolean;
+      pendencias: Array<{ codigo: string; descricao: string }>;
+      contagens: Record<string, unknown>;
+    }>('GET', '/api/v1/saida', { key: 'demo_bandeirante_titular' });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.situacao, 'ACTIVE');
+    assert.equal(response.body.podeSair, false);
+    assert.equal(response.body.pendencias[0]?.codigo, 'AVISO_NAO_DADO');
+    assert.ok(
+      response.body.pendencias[0]?.descricao.length > 10,
+      'cada pendencia vem explicada: a tela nao deve traduzir codigo',
+    );
+    assert.equal(response.body.contagens['carrosDeTerceirosNoSeuPatio'], 0);
+  });
+
+  test('vendedor nao avisa saida da rede', async () => {
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/saida', {
+      key: 'demo_bandeirante_vendedor',
+      body: {},
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.erro.codigo, 'NOT_A_PRINCIPAL');
+  });
+
+  test('o titular avisa, o prazo comeca a correr, e o aviso aparece no checklist', async () => {
+    const aviso = await api<{
+      situacao: string;
+      avisadoEm: string | null;
+      prazoTerminaEm: string | null;
+      pendencias: Array<{ codigo: string }>;
+    }>('POST', '/api/v1/saida', { key: 'demo_bandeirante_titular', body: {} });
+
+    assert.equal(aviso.status, 201);
+    assert.equal(aviso.body.situacao, 'LEAVING');
+    assert.ok(aviso.body.avisadoEm !== null);
+    assert.ok(aviso.body.prazoTerminaEm !== null);
+    assert.equal(aviso.body.pendencias[0]?.codigo, 'AVISO_EM_CURSO');
+  });
+
+  test('empresa de saida nao trava carro da rede', async () => {
+    const catalogo = await api<{ veiculos: Array<{ id: string }> }>(
+      'GET', '/api/v1/veiculos', { key: 'demo_bandeirante_titular' },
+    );
+    const alvo = catalogo.body.veiculos[0];
+    if (alvo === undefined) return;
+
+    const trava = await api<{ erro: { codigo: string } }>(
+      'POST', `/api/v1/veiculos/${alvo.id}/trava`, { key: 'demo_bandeirante_titular', body: {} },
+    );
+    assert.equal(trava.status, 403);
+    assert.equal(trava.body.erro.codigo, 'STORE_NOT_ACTIVE');
+  });
+
+  test('avisar duas vezes e bloqueado', async () => {
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/saida', {
+      key: 'demo_bandeirante_titular',
+      body: {},
+    });
+    assert.equal(response.status, 409);
+    assert.equal(response.body.erro.codigo, 'EXIT_NOTICE_ALREADY_GIVEN');
+  });
+
+  test('desistir devolve a empresa a operacao', async () => {
+    const response = await api<{ situacao: string; avisadoEm: string | null }>(
+      'DELETE', '/api/v1/saida', { key: 'demo_bandeirante_titular' },
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.situacao, 'ACTIVE');
+    assert.equal(response.body.avisadoEm, null);
+  });
+});
+
 describe('sincronizacao de feed', () => {
   const feed = (id: string, chassi: string, repasse: string) => `<?xml version="1.0" encoding="UTF-8"?>
 <estoque>

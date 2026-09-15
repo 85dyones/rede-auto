@@ -24,7 +24,7 @@ se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 531 testes
+npm run check    # typecheck estrito + 562 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -130,7 +130,7 @@ O carro de troca tem dois destinos:
   A antes do fechamento**: sem isso, a Loja B daria um valor ao cliente sem
   saber se alguém o honra.
 
-## As oito regras que sustentam a rede
+## As nove regras que sustentam a rede
 
 ### 1. Trava comercial com prazo de 4 horas
 
@@ -433,6 +433,54 @@ se estar com o carro de um parceiro adiasse a saída, bastaria segurar um carro
 para nunca ser desligado — o refém viraria escudo. As obrigações sobrevivem, e a
 lista de carros ainda em poder da empresa desligada vai no evento, para cada dona
 saber no mesmo instante o que precisa chamar de volta.
+
+### 9. Saída voluntária: duas comportas
+
+Sair por vontade própria é um fluxo **diferente** do desligamento, e usar o mesmo
+seria errado nos dois sentidos. Desligamento é sanção: precisa de fato provado,
+quórum e prazo de votação, e quem decide são os outros. Saída é decisão de quem
+sai — ninguém vota, ninguém precisa concordar, e não há nada a provar.
+
+Mas saída também não pode ser instantânea, e a razão não é burocrática: no
+instante em que a empresa deixa a rede, todo carro que ela ainda detiver — ou que
+ainda estiver detido por outros — fica **sem contraparte**. Não há mais recall a
+pedir, prazo a cobrar nem conduta a registrar. O livro de custódia continuaria
+dizendo quem está com o quê, e não haveria mais rede para fazer nada a respeito.
+
+Daí duas comportas, e as duas precisam abrir:
+
+1. **Tempo** — 30 dias de aviso prévio, para os parceiros se reorganizarem. Quem
+   conta com aquele estoque precisa de aviso, não de surpresa.
+2. **Estado** — nada em aberto: nenhum carro de terceiro no pátio dela, nenhum
+   carro dela em pátio alheio, nenhuma trava, negociação ou cobrança viva.
+
+**A comporta de estado é a que importa, e ela não é uma data.** Por mais que o
+prazo tenha vencido, a empresa não sai enquanto estiver com o carro de alguém. O
+aviso prévio é um mínimo, não o gatilho.
+
+Entre o aviso e a saída a empresa fica em `LEAVING`, e o estado tem sentido
+preciso: **não adquire exposição nova** — não trava carro alheio, não recebe
+custódia, não apresenta nem endossa candidata — **mas termina tudo o que já
+estava aberto**. Bloquear o encerramento prenderia o carro de terceiro no pátio
+de quem está saindo, que é o oposto do que se quer.
+
+Isso cai fora de graça: `memberInGoodStanding` responde falso para `LEAVING`, e é
+por ele que `canTransact` passa. Trava, apadrinhamento e endosso param sozinhos;
+check-in, devolução, recall e liquidação — que não passam por ali — seguem
+funcionando. Uma regra, não sete.
+
+**A saída se conclui sozinha.** Não há botão final de "sair agora": no passe do
+varredor em que a última pendência fecha, a empresa sai. A última pendência
+costuma fechar por um ato de *outra* loja — o aceite de uma devolução, a
+liquidação de uma negociação — e quem está saindo não tem como saber a hora
+exata. Exigir um gesto humano deixaria a empresa pronta e presa, esperando alguém
+reparar.
+
+Duas decisões laterais que valem registro: uma empresa **suspensa** pode avisar
+saída (impedir faria da suspensão uma armadilha — presa a uma rede em que não
+opera, acumulando mensalidade), e as **candidaturas que ela apadrinhou** são
+retiradas junto, porque deixar a candidata pendurada até caducar seria 30 dias de
+silêncio sobre um fato que já se sabe.
 
 ## Material de divulgação
 

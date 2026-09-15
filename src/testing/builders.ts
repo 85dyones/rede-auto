@@ -145,6 +145,7 @@ export function buildMember(overrides: Partial<Member> = {}): Member {
     joinedAt: overrides.joinedAt ?? 0,
     sponsorMemberId: overrides.sponsorMemberId ?? null,
     tariffVersion: overrides.tariffVersion ?? PILOT_TARIFF.version,
+    exitNoticeAt: overrides.exitNoticeAt ?? null,
   };
 }
 

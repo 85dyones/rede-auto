@@ -13,6 +13,8 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Pátio (coordenada) | `StoreProfile.yard` | onde a loja fica, em lat/lng. É contra ela que a entrega declarada é conferida (raio de 500 m). |
 | Quebra de protocolo | `Breach` | prazo de entrega ou retirada vencido. Objetiva, atribuível e já medida — nunca julgamento. |
 | Janela de conduta | `ConductPolicy.windowMonths` | 12 meses móveis. Três quebras dentro dela suspendem o pátio; ao sair, ele reabre sozinho. |
+| Saída voluntária | `MemberStatus.LEAVING` | avisou que sai. Não adquire exposição nova; termina o que está aberto. Conclui sozinha quando a última pendência fecha. |
+| Comportas da saída | `ExitReadiness` | tempo (30 dias de aviso) **e** estado (nada em aberto). O prazo vencido não basta. |
 | Moção de desligamento | `ExpulsionMotion` | só contra quem tem reincidência registrada. Dois terços das fundadoras, sem voto contra, com prazo — e o default do silêncio é "fica". |
 | Alcançável | `EndorsementTally.reachable` | se ainda sobram fundadoras suficientes para fechar os três endossos. `false` avisa na abertura o que, sem ele, só apareceria como caducidade 30 dias depois. |
 | Janela de fundação | `foundingWindowEndsAt` | prazo em que uma loja credenciada ainda nasce fundadora (meia adesão). 90 dias por padrão, teto de um ano. Quem entrar na janela, leva. |

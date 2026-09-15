@@ -22,6 +22,7 @@ import {
 import { BreachKind } from '../domain/conduct/breach.ts';
 import { RecallReason } from '../domain/recall/recall.ts';
 import { runConductSweep, storeConduct } from './conduct-service.ts';
+import { cancelExit, exitStatus, requestExit, sweepCompletedExits } from './exit-service.ts';
 import { endorseApplication, submitApplication, viewApplication } from './governance-service.ts';
 import { MemberKind, MemberStatus, type Member } from '../domain/network/member.ts';
 import { StoreStatus, canTransact } from '../domain/network/store.ts';
@@ -905,6 +906,222 @@ describe('conduta: as quebras de protocolo que o sistema mede sozinho', () => {
 
     assert.equal(resultado.reopened, 1);
     assert.equal((await app.context.repos.stores.byId(lojaA.store.id))?.status, StoreStatus.ACTIVE);
+    await app.stop();
+  });
+});
+
+describe('saida voluntaria: as duas comportas', () => {
+  test('o checklist existe antes de avisar — quem pensa em sair precisa ver o custo', async () => {
+    const { app, lojaA } = await novaApp();
+    const status = unwrap(await exitStatus(app.context, lojaA.member.id));
+
+    assert.equal(status.member.status, MemberStatus.ACTIVE);
+    assert.equal(status.readiness.clear, false);
+    assert.deepEqual(status.readiness.blockers, ['AVISO_NAO_DADO']);
+    await app.stop();
+  });
+
+  test('avisar impede exposicao nova mas deixa encerrar o que esta aberto', async () => {
+    const { app, lojaA, lojaB } = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaB, cadastro('RGT4B71', '9BWZZZ377VT004251')),
+    );
+
+    const saindo = unwrap(await requestExit(app.context, lojaA)).member;
+    assert.equal(saindo.status, MemberStatus.LEAVING);
+
+    // Nao trava carro de terceiro: seria negociacao que sobrevive a saida.
+    const trava = await openCommercialLock(
+      app.context,
+      { ...lojaA, member: saindo },
+      { vehicleId: carro.id },
+    );
+    assert.equal(trava.ok === false && trava.error.code, 'STORE_NOT_ACTIVE');
+
+    // Nem apresenta candidata: o endosso dela vale pelo tempo que ela ficar.
+    const candidatura = await submitApplication(
+      app.context,
+      { ...lojaA, member: saindo },
+      candidata,
+    );
+    assert.equal(candidatura.ok === false && candidatura.error.code, 'SPONSOR_NOT_ACTIVE');
+    await app.stop();
+  });
+
+  test('loja de empresa em saida nao recebe carro novo — mas recebe o proprio de volta', async () => {
+    const { app, lojaA, lojaB } = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaA, cadastro('RGT4B71', '9BWZZZ377VT004251')),
+    );
+    unwrap(await requestExit(app.context, lojaB));
+
+    const recarregado = { ...lojaB, member: (await app.context.repos.members.byId(lojaB.member.id))! };
+    const envio = await startCustodyTransfer(app.context, lojaA, {
+      vehicleId: carro.id,
+      toStoreId: recarregado.store.id,
+      purpose: TransferPurpose.EXTENDED_STOCK,
+      checkout: termoDeVistoria(lojaA, 38_400),
+    });
+
+    assert.equal(envio.ok, false);
+    assert.equal(envio.ok === false && envio.error.code, 'DESTINATION_NOT_ACCEPTING_CUSTODY');
+    await app.stop();
+  });
+
+  test('prazo vencido NAO basta: o carro de terceiro segura a saida', async () => {
+    // A comporta de estado e a que importa. Depois de EXITED nao ha mais recall
+    // a pedir nem prazo a cobrar: o carro ficaria sem contraparte.
+    const { app, clock, lojaA, lojaB } = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaA, cadastro('RGT4B71', '9BWZZZ377VT004251')),
+    );
+    const saida = unwrap(
+      await startCustodyTransfer(app.context, lojaA, {
+        vehicleId: carro.id,
+        toStoreId: lojaB.store.id,
+        purpose: TransferPurpose.EXTENDED_STOCK,
+        checkout: termoDeVistoria(lojaA, 38_400),
+      }),
+    );
+    unwrap(
+      await completeCustodyTransfer(app.context, lojaB, saida.transfer.id, termoDeVistoria(lojaB, 38_400)),
+    );
+
+    unwrap(await requestExit(app.context, lojaB));
+    clock.advance(120 * DAY);
+
+    const status = unwrap(await exitStatus(app.context, lojaB.member.id));
+    assert.equal(status.readiness.noticeServed, true, 'o prazo ja venceu');
+    assert.equal(status.readiness.holdingOthersVehicles, 1);
+    assert.equal(status.readiness.clear, false);
+
+    await sweepCompletedExits(app.context, app.seed!.cluster.id);
+    assert.equal(
+      (await app.context.repos.members.byId(lojaB.member.id))?.status,
+      MemberStatus.LEAVING,
+      'nao saiu com o carro dos outros no patio',
+    );
+    await app.stop();
+  });
+
+  test('devolvido o carro e quitada a fatura, a saida se conclui sozinha', async () => {
+    const { app, clock, lojaA, lojaB } = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaA, cadastro('RGT4B71', '9BWZZZ377VT004251')),
+    );
+    const ida = unwrap(
+      await startCustodyTransfer(app.context, lojaA, {
+        vehicleId: carro.id,
+        toStoreId: lojaB.store.id,
+        purpose: TransferPurpose.EXTENDED_STOCK,
+        checkout: termoDeVistoria(lojaA, 38_400),
+      }),
+    );
+    unwrap(
+      await completeCustodyTransfer(app.context, lojaB, ida.transfer.id, termoDeVistoria(lojaB, 38_400)),
+    );
+
+    unwrap(await requestExit(app.context, lojaB));
+    clock.advance(40 * DAY);
+
+    // Devolve o carro para a dona. Isso continua permitido em LEAVING — e
+    // justamente o que ela precisa fazer para sair.
+    const volta = unwrap(
+      await startCustodyTransfer(app.context, lojaB, {
+        vehicleId: carro.id,
+        toStoreId: lojaA.store.id,
+        purpose: TransferPurpose.RECALL_RETURN,
+        checkout: termoDeVistoria(lojaB, 38_600),
+      }),
+    );
+    unwrap(
+      await completeCustodyTransfer(app.context, lojaA, volta.transfer.id, termoDeVistoria(lojaA, 38_600)),
+    );
+
+    // Quita o que deve.
+    await runBillingSweep(app.context, app.seed!.cluster.id);
+    const extrato = unwrap(await memberStatement(app.context, lojaB.member.id));
+    for (const cobranca of extrato.charges.filter((c) => c.status === 'OPEN')) {
+      unwrap(await registerChargePayment(app.context, cobranca.id));
+    }
+
+    const concluidas = await sweepCompletedExits(app.context, app.seed!.cluster.id);
+    assert.equal(concluidas, 1);
+
+    const saiu = (await app.context.repos.members.byId(lojaB.member.id))!;
+    assert.equal(saiu.status, MemberStatus.EXITED);
+    for (const patio of await app.context.repos.stores.byMember(saiu.id)) {
+      assert.equal(patio.status, StoreStatus.EXITED);
+    }
+    await app.stop();
+  });
+
+  test('empresa que saiu nao e mais faturada', async () => {
+    // Sem isto ela acumularia mensalidade para sempre, e o varredor tentaria
+    // suspender quem ja saiu.
+    const { app, clock, lojaB } = await novaApp();
+    unwrap(await requestExit(app.context, lojaB));
+    clock.advance(40 * DAY);
+
+    await runBillingSweep(app.context, app.seed!.cluster.id);
+    const extrato = unwrap(await memberStatement(app.context, lojaB.member.id));
+    for (const cobranca of extrato.charges.filter((c) => c.status === 'OPEN')) {
+      unwrap(await registerChargePayment(app.context, cobranca.id));
+    }
+    await sweepCompletedExits(app.context, app.seed!.cluster.id);
+    assert.equal(
+      (await app.context.repos.members.byId(lojaB.member.id))?.status,
+      MemberStatus.EXITED,
+    );
+
+    clock.advance(60 * DAY);
+    await runBillingSweep(app.context, app.seed!.cluster.id);
+
+    const depois = unwrap(await memberStatement(app.context, lojaB.member.id));
+    assert.equal(depois.outstanding.cents, 0, 'nao voltou a ser cobrada');
+    await app.stop();
+  });
+
+  test('fundadora que sai encolhe o rol — porque ele e contado, nao declarado', async () => {
+    const { app, clock, lojaB } = await novaApp();
+    const antes = await app.context.repos.members.founders(lojaB.member.clusterId);
+    assert.equal(antes.length, 10);
+
+    unwrap(await requestExit(app.context, lojaB));
+    clock.advance(40 * DAY);
+    await runBillingSweep(app.context, app.seed!.cluster.id);
+    const extrato = unwrap(await memberStatement(app.context, lojaB.member.id));
+    for (const cobranca of extrato.charges.filter((c) => c.status === 'OPEN')) {
+      unwrap(await registerChargePayment(app.context, cobranca.id));
+    }
+    await sweepCompletedExits(app.context, app.seed!.cluster.id);
+
+    // O rol segue com dez linhas, mas a saida ja nao endossa nada: a apuracao
+    // filtra por `memberInGoodStanding`, entao o denominador cai sozinho.
+    const aberta = unwrap(
+      await submitApplication(app.context, seededActor(app.seed!.stores[0]!), candidata),
+    );
+    assert.equal(
+      aberta.tally.foundersYetToEndorse,
+      8,
+      'dez fundadoras, menos a padrinho, menos a que saiu',
+    );
+    await app.stop();
+  });
+
+  test('desistir da saida devolve a empresa a operacao', async () => {
+    const { app, lojaB } = await novaApp();
+    unwrap(await requestExit(app.context, lojaB));
+
+    const voltou = unwrap(
+      await cancelExit(app.context, {
+        ...lojaB,
+        member: (await app.context.repos.members.byId(lojaB.member.id))!,
+      }),
+    );
+
+    assert.equal(voltou.member.status, MemberStatus.ACTIVE);
+    assert.equal(voltou.readiness.noticeGivenAt, null);
     await app.stop();
   });
 });
