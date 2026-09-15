@@ -168,10 +168,13 @@ export function canTransact(store: Store): boolean {
 }
 
 /**
- * Voto de credenciamento exige loja fundadora ativa e usuario titular.
+ * Endossar credenciamento exige loja fundadora ativa e usuario titular.
  * Concentrar a regra aqui evita reimplementa-la em cada rota.
+ *
+ * Endosso nao e voto: quem admite e a plataforma. O que a fundadora faz aqui e
+ * colocar a reputacao dela atras de uma candidata que ela conhece.
  */
-export function canVoteOnMembership(
+export function canEndorseMembership(
   store: Store,
   user: NetworkUser,
   clusterId: ClusterId = store.clusterId,

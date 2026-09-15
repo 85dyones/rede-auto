@@ -17,6 +17,7 @@ async function labelOf(router: Router, method: string, path: string): Promise<st
     body: undefined,
     rawBody: Buffer.alloc(0),
     actor: null,
+    operator: null,
     requestId: 'teste',
   });
   return (response.body as { label: string }).label;

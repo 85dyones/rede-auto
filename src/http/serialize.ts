@@ -16,7 +16,7 @@ import { type Money, format as formatMoney } from '../domain/shared/money.ts';
 import type { Cluster } from '../domain/cluster/cluster.ts';
 import type { Store } from '../domain/network/store.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
-import type { MembershipApplication, Tally } from '../domain/network/membership.ts';
+import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
 import type { Vehicle } from '../domain/vehicle/vehicle.ts';
 import type { CommercialLock } from '../domain/lock/commercial-lock.ts';
 import type { CustodyTransfer, InspectionTerm } from '../domain/custody/custody.ts';
@@ -364,7 +364,7 @@ export function dealDto(deal: Deal, viewerStoreId: StoreId) {
   };
 }
 
-export function applicationDto(application: MembershipApplication, tally: Tally, admitted: Store | null) {
+export function applicationDto(application: MembershipApplication, tally: EndorsementTally, admitted: Store | null) {
   return {
     id: application.id,
     candidata: {
@@ -379,17 +379,20 @@ export function applicationDto(application: MembershipApplication, tally: Tally,
     situacao: application.status,
     abertaEm: instant(application.openedAt),
     decididaEm: instant(application.decidedAt),
+    decididaPor: application.decidedBy,
+    observacaoDaDecisao: application.decisionNote,
+    justificativaDeExcecao: application.endorsementOverride,
     apuracao: {
-      avais: tally.approvals,
-      contrarios: tally.rejections,
-      faltamAvais: tally.approvalsStillNeeded,
-      fundadoresPendentes: tally.pendingFounders,
+      endossos: tally.endorsements,
+      recomendado: tally.recommended,
+      faltamParaORecomendado: tally.stillRecommended,
+      atingeORecomendado: tally.meetsRecommendation,
+      fundadorasQuePodemEndossar: tally.foundersYetToEndorse,
     },
-    votos: application.votes.map((vote) => ({
-      fundadoraId: vote.founderStoreId,
-      decisao: vote.decision,
-      em: instant(vote.castAt),
-      justificativa: vote.note,
+    endossos: application.endorsements.map((e) => ({
+      fundadoraId: e.founderStoreId,
+      em: instant(e.givenAt),
+      justificativa: e.note,
     })),
     lojaCredenciada: admitted === null ? null : storeDto(admitted),
   };

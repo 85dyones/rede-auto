@@ -4,19 +4,20 @@
 
 import { notFoundError } from '../../domain/shared/errors.ts';
 import { asApplicationId } from '../../domain/shared/ids.ts';
-import { VoteDecision } from '../../domain/network/membership.ts';
 import type { AppContext } from '../../application/context.ts';
 import {
   retireApplication,
   submitApplication,
   viewApplication,
-  voteOnApplication,
+  admitApplication,
+  endorseApplication,
+  rejectApplication,
 } from '../../application/governance-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
 import { applicationDto, clusterDto, storeDto } from '../serialize.ts';
-import { asObject, optionalText, oneOf } from '../parse.ts';
-import { requireActor } from './support.ts';
+import { asObject, optionalText, text } from '../parse.ts';
+import { requireActor, requireOperator } from './support.ts';
 
 export function registerNetworkRoutes(router: Router, context: AppContext): void {
   /** As lojas da **sua** praca. Nao existe "todas as lojas da instalacao". */
@@ -53,7 +54,7 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     const founders = await context.repos.stores.founders(actor.value.store.clusterId);
     return json(200, {
       total: founders.length,
-      avaisNecessarios: context.policies.governance.requiredApprovals,
+      endossosRecomendados: context.policies.governance.recommendedEndorsements,
       lojas: founders.map(storeDto),
     });
   });
@@ -90,27 +91,74 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     return json(200, { total: views.length, candidaturas: views });
   });
 
-  /** Aval de fundador. O terceiro voto favoravel ja credencia a loja. */
-  router.post('/api/v1/credenciamentos/:id/votos', async (request) => {
+  /**
+   * Endosso de fundadora. NAO credencia — a candidatura segue pendente ate a
+   * plataforma decidir. Endosso e a palavra de quem conhece a candidata; a
+   * admissao e decisao de quem opera a rede.
+   */
+  router.post('/api/v1/credenciamentos/:id/endossos', async (request) => {
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     const body = asObject(request.body);
     if (!body.ok) return errorResponse(body.error, request.requestId);
 
-    const decision = oneOf(body.value, 'decisao', [VoteDecision.APPROVE, VoteDecision.REJECT]);
-    if (!decision.ok) return errorResponse(decision.error, request.requestId);
-
-    const result = await voteOnApplication(
+    const result = await endorseApplication(
       context,
       actor.value,
       asApplicationId(request.params['id'] as string),
-      decision.value,
       optionalText(body.value, 'justificativa'),
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
+    return json(200, applicationDto(result.value.application, result.value.tally, null));
+  });
+
+  /** A plataforma admite. Abaixo do endosso recomendado exige justificativa. */
+  router.post('/api/v1/credenciamentos/:id/admissao', async (request) => {
+    const operator = requireOperator(request);
+    if (!operator.ok) return errorResponse(operator.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const note = optionalText(body.value, 'observacao');
+    const override = optionalText(body.value, 'justificativaDeExcecao');
+
+    const result = await admitApplication(
+      context,
+      operator.value.name,
+      asApplicationId(request.params['id'] as string),
+      {
+        ...(note === undefined ? {} : { note }),
+        ...(override === undefined ? {} : { endorsementOverride: override }),
+      },
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
     return json(200, applicationDto(result.value.application, result.value.tally, result.value.admittedStore));
+  });
+
+  /** A plataforma recusa. Motivo obrigatorio: quem indicou precisa saber. */
+  router.post('/api/v1/credenciamentos/:id/recusa', async (request) => {
+    const operator = requireOperator(request);
+    if (!operator.ok) return errorResponse(operator.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const motivo = text(body.value, 'motivo', { min: 10, max: 500 });
+    if (!motivo.ok) return errorResponse(motivo.error, request.requestId);
+
+    const result = await rejectApplication(
+      context,
+      operator.value.name,
+      asApplicationId(request.params['id'] as string),
+      motivo.value,
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(200, applicationDto(result.value.application, result.value.tally, null));
   });
 
   router.delete('/api/v1/credenciamentos/:id', async (request) => {

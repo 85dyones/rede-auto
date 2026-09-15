@@ -100,8 +100,8 @@ recusa acima de 300 km.
 ### `GET /api/v1/lojas` · `GET /api/v1/lojas/fundadoras`
 
 Lojas **da sua praça** — não existe "todas as lojas da instalação". A segunda
-traz também `avaisNecessarios`, e lista apenas as fundadoras do seu cluster: o
-quórum de 3 é contado dentro de uma praça só.
+traz também `endossosRecomendados`, e lista apenas as fundadoras do seu cluster:
+o endosso é contado dentro de uma praça só.
 
 ### `POST /api/v1/credenciamentos`
 
@@ -797,6 +797,6 @@ necessário para a correção do estado**.
 | `MAX_BODY_BYTES` | `41943040` | teto do corpo (feeds grandes) |
 | `SEED_DEMO_DATA` | `true` | semeia as 6 fundadoras e o estoque de exemplo |
 
-As políticas de negócio (4h de trava, 4h úteis de SLA, quórum de 3 em 6,
+As políticas de negócio (4h de trava, 4h úteis de SLA, endossos recomendados,
 tolerâncias de vistoria) ficam em `src/config.ts`, não em variável de ambiente:
 são cláusulas do contrato da rede, e mudá-las é decisão de governança.

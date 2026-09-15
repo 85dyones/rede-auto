@@ -93,7 +93,7 @@ A fronteira não depende de ninguém lembrar dela:
   de "não existe" já entrega que existe.
 - Broadcast de notificação exige `clusterId` no tipo; um aviso sem praça não
   chega a ninguém, em vez de chegar à rede errada.
-- `founders(clusterId)` e `pending(clusterId)`: o quórum de 3 é contado dentro de
+- `founders(clusterId)` e `pending(clusterId)`: o endosso é contado dentro de
   uma praça só. Fundadora de Curitiba não vota em candidata de Londrina.
 
 O que **não** existe ainda, e é deliberado: cobrança, provisionamento de praça e
@@ -223,15 +223,22 @@ conversa sobre quem paga o quê.
 E o livro de custódia responde à pergunta que uma multa faz: **quem estava com o
 carro em 12/03 às 14h32?**
 
-### 4. Governança: 6 fundadoras, 3 avais
+### 4. Governança: fundadoras endossam, a plataforma decide
 
-A rede é fechada. Uma loja nova precisa do aval de pelo menos 3 das 6
-fundadoras. O terceiro aval já credencia — não há razão para segurar a entrada
-esperando os outros três votarem.
+A rede é fechada, e a qualificação vem do **endosso**: uma fundadora coloca a
+reputação dela atrás de uma candidata que conhece de praça. Mas endosso não é
+voto — quem admite é a plataforma.
 
-A candidatura é **reprovada ao quarto voto contrário**, porque com 6 votos
-disponíveis 3 avais tornam-se aritmeticamente impossíveis. A loja padrinho não
-vota na própria indicação, e quem entra depois não vira fundador.
+A diferença não é burocrática, é de incentivo. Enquanto o credenciamento era
+decidido por quórum, as fundadoras tinham nas mãos o poder de barrar
+concorrência direta e chamar isso de critério. Tirar a decisão delas remove o
+conflito sem jogar fora o que elas sabem.
+
+**Não existe endosso contrário.** Quem tem restrição simplesmente não endossa, e
+a ausência já é o sinal. A plataforma pode admitir abaixo do endosso recomendado,
+mas precisa registrar a justificativa — é o que impede o endosso de virar enfeite
+sem transformá-lo em veto. A padrinho não endossa a própria indicação, e quem
+entra depois não vira fundadora.
 
 ## Material de divulgação
 

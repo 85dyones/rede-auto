@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from 'node:crypto';
 import { isDomainError, InvariantViolationError } from '../domain/shared/errors.ts';
 import type { AppContext } from '../application/context.ts';
-import { ApiKeyRegistry, extractApiKey } from '../infra/auth/api-keys.ts';
+import { ApiKeyRegistry, PlatformKeyRegistry, extractApiKey } from '../infra/auth/api-keys.ts';
 import { Router } from './router.ts';
 import {
   type HttpMethod,
@@ -25,6 +25,8 @@ export type ServerDependencies = {
   readonly context: AppContext;
   readonly router: Router;
   readonly apiKeys: ApiKeyRegistry;
+  /** Chaves de operacao da plataforma. Ausente em testes que nao exercitam isso. */
+  readonly platformKeys?: PlatformKeyRegistry | undefined;
   readonly maxBodyBytes: number;
 };
 
@@ -105,11 +107,15 @@ async function handle(
       return;
     }
 
-    const actor = match.isPublic
+    const apiKey = extractApiKey(request.headers);
+    const actor = match.isPublic ? null : await resolveActor(dependencies, apiKey);
+    // A plataforma e um ator sem loja. Chave de lojista nunca resolve para
+    // operador e vice-versa — os registros sao separados de proposito.
+    const operator = match.isPublic
       ? null
-      : await resolveActor(dependencies, extractApiKey(request.headers));
+      : (dependencies.platformKeys?.resolve(apiKey) ?? null);
 
-    if (!match.isPublic && actor === null) {
+    if (!match.isPublic && actor === null && operator === null) {
       sendResponse(
         response,
         json(401, {
@@ -133,6 +139,7 @@ async function handle(
       body: parsedBody.value,
       rawBody,
       actor,
+      operator,
       requestId,
     };
 

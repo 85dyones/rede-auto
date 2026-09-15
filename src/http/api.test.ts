@@ -835,103 +835,102 @@ describe('a dona nao ve a margem da parceira', () => {
   });
 });
 
-describe('credenciamento pelos fundadores', () => {
+describe('credenciamento: fundadoras endossam, a plataforma decide', () => {
   let applicationId: string;
+  const PLATAFORMA = 'demo_plataforma';
 
   const candidata = {
     legalName: 'Nova Garagem Veiculos LTDA',
     tradeName: 'Nova Garagem',
     cnpj: '07.526.557/0001-00',
-    city: 'Sorocaba',
-    state: 'SP',
-    phone: '(15) 99876-5432',
+    city: 'Sao Jose dos Pinhais',
+    state: 'PR',
+    phone: '(41) 99876-5432',
     email: 'contato@novagaragem.com.br',
     responsibleName: 'Joao Pereira',
   };
 
   test('uma fundadora apresenta a candidata', async () => {
-    const response = await api<{ id: string; situacao: string; apuracao: { faltamAvais: number } }>(
-      'POST',
-      '/api/v1/credenciamentos',
-      { key: PRIME, body: { candidata } },
-    );
+    const response = await api<{
+      id: string; situacao: string; apuracao: { faltamParaORecomendado: number };
+    }>('POST', '/api/v1/credenciamentos', { key: PRIME, body: { candidata } });
+
     assert.equal(response.status, 201);
     applicationId = response.body.id;
     assert.equal(response.body.situacao, 'PENDING');
-    assert.equal(response.body.apuracao.faltamAvais, 3);
+    assert.equal(response.body.apuracao.faltamParaORecomendado, 2);
   });
 
-  test('a padrinho nao vota na propria indicacao', async () => {
+  test('a padrinho nao endossa a propria indicacao', async () => {
     const response = await api<{ erro: { codigo: string } }>(
-      'POST',
-      `/api/v1/credenciamentos/${applicationId}/votos`,
-      { key: PRIME, body: { decisao: 'APPROVE' } },
+      'POST', `/api/v1/credenciamentos/${applicationId}/endossos`, { key: PRIME, body: {} },
     );
     assert.equal(response.status, 422);
-    assert.equal(response.body.erro.codigo, 'SPONSOR_CANNOT_VOTE');
+    assert.equal(response.body.erro.codigo, 'SPONSOR_CANNOT_ENDORSE');
   });
 
-  test('vendedor nao vota — o aval e do titular', async () => {
-    const response = await api('POST', `/api/v1/credenciamentos/${applicationId}/votos`, {
-      key: PRIME_VENDEDOR,
-      body: { decisao: 'APPROVE' },
+  test('vendedor nao endossa — o endosso e do titular', async () => {
+    const response = await api('POST', `/api/v1/credenciamentos/${applicationId}/endossos`, {
+      key: PRIME_VENDEDOR, body: {},
     });
     assert.equal(response.status, 403);
   });
 
-  test('dois avais ainda nao credenciam', async () => {
-    for (const key of [VELOZ, 'demo_central_titular']) {
-      const response = await api<{ situacao: string }>(
-        'POST',
-        `/api/v1/credenciamentos/${applicationId}/votos`,
-        { key, body: { decisao: 'APPROVE' } },
+  test('endossos nao credenciam ninguem', async () => {
+    // Esta e a diferenca entre endosso e quorum: por mais endossos que
+    // cheguem, a candidatura segue pendente ate a plataforma se manifestar.
+    for (const key of [VELOZ, 'demo_central_titular', 'demo_norte_titular']) {
+      const response = await api<{ situacao: string; lojaCredenciada: unknown }>(
+        'POST', `/api/v1/credenciamentos/${applicationId}/endossos`,
+        { key, body: { justificativa: 'Conheco a operacao de perto.' } },
       );
       assert.equal(response.body.situacao, 'PENDING');
+      assert.equal(response.body.lojaCredenciada, null);
     }
   });
 
-  test('o terceiro aval aprova e a loja ja entra na rede operando', async () => {
-    const response = await api<{ situacao: string; lojaCredenciada: { id: string; tipo: string } }>(
-      'POST',
-      `/api/v1/credenciamentos/${applicationId}/votos`,
-      { key: 'demo_norte_titular', body: { decisao: 'APPROVE' } },
+  test('chave de lojista nao admite candidata', async () => {
+    const response = await api<{ erro: { codigo: string } }>(
+      'POST', `/api/v1/credenciamentos/${applicationId}/admissao`, { key: PRIME, body: {} },
     );
+    assert.equal(response.status, 403);
+    assert.equal(response.body.erro.codigo, 'PLATFORM_OPERATOR_REQUIRED');
+  });
+
+  test('a plataforma admite e a loja ja entra operando', async () => {
+    const response = await api<{
+      situacao: string; decididaPor: string; lojaCredenciada: { id: string; tipo: string };
+    }>('POST', `/api/v1/credenciamentos/${applicationId}/admissao`, {
+      key: PLATAFORMA,
+      body: { observacao: 'Tres endossos, cadastro completo.' },
+    });
+
     assert.equal(response.body.situacao, 'APPROVED');
-    assert.equal(response.body.lojaCredenciada.tipo, 'MEMBER', 'quem entra depois nao vira fundador');
+    assert.equal(response.body.decididaPor, 'Operacao rede-auto');
+    assert.equal(response.body.lojaCredenciada.tipo, 'MEMBER', 'quem entra depois nao vira fundadora');
 
     const stores = await api<{ total: number }>('GET', '/api/v1/lojas', { key: PRIME });
     assert.equal(stores.body.total, 7);
   });
 
-  test('a praca se apresenta com alcance declarado', async () => {
-    const response = await api<{
-      cluster: {
-        nome: string;
-        identificador: string;
-        uf: string;
-        municipios: string[];
-        raioOperacionalKm: number;
-        situacao: string;
-      };
-    }>('GET', '/api/v1/cluster', { key: PRIME });
+  test('sem endosso, admitir exige justificativa registrada', async () => {
+    const outra = await api<{ id: string }>('POST', '/api/v1/credenciamentos', {
+      key: PRIME,
+      body: { candidata: { ...candidata, cnpj: '02.558.157/0001-62', tradeName: 'Garagem Sem Aval' } },
+    });
 
-    assert.equal(response.status, 200);
-    assert.equal(response.body.cluster.identificador, 'curitiba-rmc');
-    assert.equal(response.body.cluster.uf, 'PR');
-    assert.equal(response.body.cluster.situacao, 'ACTIVE');
-    assert.ok(
-      response.body.cluster.municipios.includes('Curitiba'),
-      'o piloto e Curitiba e regiao',
+    const semJustificativa = await api<{ erro: { codigo: string } }>(
+      'POST', `/api/v1/credenciamentos/${outra.body.id}/admissao`, { key: PLATAFORMA, body: {} },
     );
-    assert.ok(
-      response.body.cluster.raioOperacionalKm <= 300,
-      'raio acima disso e o SLA de recall deixa de ser cumprivel',
-    );
-  });
+    assert.equal(semJustificativa.status, 422);
+    assert.equal(semJustificativa.body.erro.codigo, 'ENDORSEMENT_BELOW_RECOMMENDED');
 
-  test('sem chave nao se descobre nem em que praca a instalacao opera', async () => {
-    const response = await api('GET', '/api/v1/cluster');
-    assert.equal(response.status, 401);
+    const comJustificativa = await api<{ situacao: string; justificativaDeExcecao: string }>(
+      'POST', `/api/v1/credenciamentos/${outra.body.id}/admissao`,
+      { key: PLATAFORMA, body: { justificativaDeExcecao: 'Mesmo grupo de uma fundadora; operacao ja conhecida.' } },
+    );
+    assert.equal(comJustificativa.body.situacao, 'APPROVED');
+    assert.match(comJustificativa.body.justificativaDeExcecao, /Mesmo grupo/);
   });
 });
 

@@ -41,7 +41,7 @@ quórum novo.
    │  6 fundadoras            │           │  fundadoras próprias     │
    │  estoque                 │     ╳     │  estoque                 │
    │  custódia física         │  não se   │  custódia física         │
-   │  quórum de 3 avais       │  cruzam   │  quórum próprio          │
+   │  endossos próprios       │  cruzam   │  endossos próprios       │
    └──────────────────────────┘           └──────────────────────────┘
 ```
 
@@ -377,22 +377,33 @@ Regras que a conta impõe:
      openApplication
           │
           ▼
-       PENDING ──── 3º aval ────► APPROVED ──── admitApprovedStore ──► loja MEMBER
-          │
-          ├──── 4º voto contrário ────► REJECTED
-          │
+                    endorse (n vezes, não decide nada)
+                              │
+       PENDING ───────────────┴──── admitCandidate ──► APPROVED ──► loja MEMBER
+          │                              (plataforma)
+          ├──── rejectCandidate ────► REJECTED
+          │        (plataforma, motivo obrigatório)
           └──── withdrawApplication ──► WITHDRAWN
 ```
 
-- só o titular (`PRINCIPAL`) de loja fundadora ativa vota;
-- um voto por fundadora, substituível enquanto a decisão não saiu;
-- a loja padrinho não vota na própria indicação;
-- limiar de reprovação = `founderCount − requiredApprovals + 1` = 4.
+**Endosso não é voto.** A fundadora coloca a reputação atrás de uma candidata que
+conhece; quem admite é a plataforma. A diferença é de incentivo: enquanto o
+credenciamento era quórum, as fundadoras podiam barrar concorrência direta e
+chamar isso de critério.
 
-Aprovar e credenciar são funções separadas de propósito: aprovar é ato de
+- só o titular (`PRINCIPAL`) de loja fundadora ativa endossa;
+- **não existe endosso contrário** — quem tem restrição não endossa, e a ausência
+  já é o sinal. Modelar rejeição devolveria o veto pela porta dos fundos;
+- a padrinho não endossa a própria indicação, e sai do denominador da apuração;
+- endossar de novo atualiza a nota, não soma.
+
+A plataforma **pode** admitir abaixo de `recommendedEndorsements`, mas não em
+silêncio: exige `endorsementOverride` registrado na candidatura. É o que impede o
+endosso de virar enfeite sem transformá-lo em veto.
+
+Decidir e credenciar são funções separadas de propósito: decidir é ato de
 governança, credenciar é provisionamento. Se a criação da loja falhar, a decisão
-dos fundadores permanece registrada e o provisionamento pode ser repetido sem
-nova votação.
+permanece registrada e o provisionamento pode ser repetido.
 
 ## Eventos de domínio
 

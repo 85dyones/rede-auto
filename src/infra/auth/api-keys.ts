@@ -21,6 +21,40 @@ export type ApiKeyRecord = {
   readonly label: string;
 };
 
+/**
+ * A plataforma tambem e um ator, e nao e loja nenhuma.
+ *
+ * Desde que o credenciamento deixou de ser decidido por quorum, quem admite e
+ * recusa candidata e a operacao da plataforma — e ela precisa de identidade
+ * propria na trilha de auditoria. Uma chave de lojista nunca resolve para
+ * operador, e vice-versa: sao registros separados de proposito.
+ */
+export type PlatformOperator = {
+  readonly operatorId: string;
+  readonly name: string;
+};
+
+export class PlatformKeyRegistry {
+  readonly #byHash = new Map<string, PlatformOperator>();
+
+  register(plainKey: string, operator: PlatformOperator): void {
+    this.#byHash.set(hashKey(plainKey), operator);
+  }
+
+  resolve(plainKey: string | undefined): PlatformOperator | undefined {
+    if (plainKey === undefined || plainKey.length === 0) return undefined;
+    const candidate = hashKey(plainKey);
+    for (const [hash, operator] of this.#byHash) {
+      if (constantTimeEquals(hash, candidate)) return operator;
+    }
+    return undefined;
+  }
+
+  size(): number {
+    return this.#byHash.size;
+  }
+}
+
 export class ApiKeyRegistry {
   /** hash da chave -> identidade. A chave em claro nunca fica em memoria. */
   readonly #byHash = new Map<string, ApiKeyRecord>();

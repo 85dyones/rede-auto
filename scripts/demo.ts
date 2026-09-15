@@ -43,7 +43,11 @@ import {
   settleDeal,
   startDeal,
 } from '../src/application/deal-service.ts';
-import { submitApplication, voteOnApplication } from '../src/application/governance-service.ts';
+import {
+  admitApplication,
+  endorseApplication,
+  submitApplication,
+} from '../src/application/governance-service.ts';
 import { syncStoreFeed } from '../src/application/feed-service.ts';
 import { downloadMaterial, publishMaterial } from '../src/application/material-service.ts';
 import { sealTerm, TransferPurpose, PhotoAngle } from '../src/domain/custody/custody.ts';
@@ -51,7 +55,6 @@ import { VehicleAngle } from '../src/domain/vehicle/vehicle.ts';
 import { EvidenceType } from '../src/domain/lock/evidence.ts';
 import { RecallReason } from '../src/domain/recall/recall.ts';
 import { SettlementMethod, TradeInDestination } from '../src/domain/deal/deal.ts';
-import { VoteDecision } from '../src/domain/network/membership.ts';
 import { toZonedParts } from '../src/domain/shared/business-hours.ts';
 import type { VehicleId } from '../src/domain/shared/ids.ts';
 
@@ -160,7 +163,6 @@ const lojaAVendedor: Actor = { store: seed.stores[0]!.store, user: seed.stores[0
 const lojaB: Actor = { store: seed.stores[1]!.store, user: seed.stores[1]!.principal };
 const lojaBVendedor: Actor = { store: seed.stores[1]!.store, user: seed.stores[1]!.salesperson };
 const lojaC: Actor = { store: seed.stores[2]!.store, user: seed.stores[2]!.principal };
-const lojaD: Actor = { store: seed.stores[3]!.store, user: seed.stores[3]!.principal };
 
 console.log('\n=============================================================');
 console.log('  REDE-AUTO — demonstracao da operacao ponta a ponta');
@@ -177,7 +179,8 @@ for (const seeded of seed.stores) {
   diz(`${seeded.store.profile.tradeName.padEnd(22)} ${seeded.store.profile.city}/${seeded.store.profile.state}`);
 }
 destaque(
-  `Credenciar loja nova exige ${context.policies.governance.requiredApprovals} avais entre ${context.policies.governance.founderCount} fundadoras — desta praca.`,
+  `Credenciamento: ${context.policies.governance.recommendedEndorsements} endossos recomendados entre ` +
+    `${context.policies.governance.founderCount} fundadoras — e a decisao e da plataforma.`,
 );
 destaque(
   'A rede e local, e isso nao e detalhe de lancamento: o SLA de 4 horas uteis so e ' +
@@ -577,23 +580,37 @@ const candidatura = unwrap(
     responsibleName: 'Joao Pereira',
   }),
 );
-diz(`${lojaA.store.profile.tradeName} apresenta a Nova Garagem. Faltam ${candidatura.tally.approvalsStillNeeded} avais.`);
+diz(
+  `${lojaA.store.profile.tradeName} apresenta a Nova Garagem. ` +
+    `Endossos recomendados: ${candidatura.tally.recommended}.`,
+);
 
-const autoVoto = await voteOnApplication(context, lojaA, candidatura.application.id, VoteDecision.APPROVE);
-diz(`A padrinho tenta avalizar a propria indicacao: ${autoVoto.ok ? 'aceito' : autoVoto.error.message}`);
+const autoEndosso = await endorseApplication(context, lojaA, candidatura.application.id);
+diz(`A padrinho tenta endossar a propria indicacao: ${autoEndosso.ok ? 'aceito' : autoEndosso.error.message}`);
 
 let apuracao = candidatura.tally;
-for (const votante of [lojaB, lojaC, lojaD]) {
-  const voto = unwrap(await voteOnApplication(context, votante, candidatura.application.id, VoteDecision.APPROVE));
-  apuracao = voto.tally;
-  diz(
-    `Aval de ${votante.store.profile.tradeName.padEnd(20)} -> ${voto.application.status} (${apuracao.approvals}/${context.policies.governance.requiredApprovals})`,
+for (const fundadora of [lojaB, lojaC]) {
+  const endosso = unwrap(
+    await endorseApplication(context, fundadora, candidatura.application.id, 'Conheco a operacao de perto.'),
   );
-  if (voto.admittedStore !== null) {
-    destaque(
-      `${voto.admittedStore.profile.tradeName} credenciada como ${voto.admittedStore.kind} — entra operando, sem direito a voto.`,
-    );
-  }
+  apuracao = endosso.tally;
+  diz(
+    `Endosso de ${fundadora.store.profile.tradeName.padEnd(20)} -> ` +
+      `${endosso.application.status} (${apuracao.endorsements}/${apuracao.recommended})`,
+  );
+}
+destaque('Endossar nao credencia: a candidatura segue pendente. Quem admite e a plataforma.');
+
+const admissao = unwrap(
+  await admitApplication(context, 'Operacao rede-auto', candidatura.application.id, {
+    note: 'Dois endossos, cadastro completo, laudo em dia.',
+  }),
+);
+if (admissao.admittedStore !== null) {
+  destaque(
+    `${admissao.admittedStore.profile.tradeName} credenciada como ${admissao.admittedStore.kind} ` +
+      `por decisao da plataforma — entra operando.`,
+  );
 }
 
 // ---------------------------------------------------------------------------

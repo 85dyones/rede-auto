@@ -9,6 +9,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ErrorKind, type DomainError } from '../domain/shared/errors.ts';
+import type { PlatformOperator } from '../infra/auth/api-keys.ts';
 import type { Actor } from '../application/context.ts';
 
 export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -24,6 +25,8 @@ export type RequestContext = {
   readonly rawBody: Buffer;
   /** Preenchido nas rotas autenticadas. */
   readonly actor: Actor | null;
+  /** Operador da plataforma, quando a chave e de operacao e nao de lojista. */
+  readonly operator: PlatformOperator | null;
   readonly requestId: string;
 };
 

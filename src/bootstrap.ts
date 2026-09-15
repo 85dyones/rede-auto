@@ -15,7 +15,7 @@ import type { AppContext } from './application/context.ts';
 import { startSweeper, type Sweeper } from './application/scheduler.ts';
 import { registerNotificationSubscriber } from './application/notifications.ts';
 import { createInMemoryRepositories, type Repositories } from './infra/persistence/repositories.ts';
-import { ApiKeyRegistry } from './infra/auth/api-keys.ts';
+import { ApiKeyRegistry, PlatformKeyRegistry } from './infra/auth/api-keys.ts';
 import { Router } from './http/router.ts';
 import { json } from './http/http-types.ts';
 import { registerNetworkRoutes } from './http/routes/network.ts';
@@ -33,6 +33,7 @@ export type Application = {
   readonly context: AppContext;
   readonly router: Router;
   readonly apiKeys: ApiKeyRegistry;
+  readonly platformKeys: PlatformKeyRegistry;
   readonly server: Server;
   readonly seed: SeedResult | null;
   start(): Promise<{ port: number }>;
@@ -62,6 +63,15 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
   registerNotificationSubscriber(context);
 
   const apiKeys = new ApiKeyRegistry();
+  // A plataforma e um ator sem loja: desde que o credenciamento deixou de ser
+  // quorum, quem admite e recusa precisa de identidade propria na auditoria.
+  const platformKeys = new PlatformKeyRegistry();
+  if (config.seedDemoData) {
+    platformKeys.register('demo_plataforma', {
+      operatorId: 'op_demo',
+      name: 'Operacao rede-auto',
+    });
+  }
   const router = buildRouter(context, config);
 
   const seed = config.seedDemoData
@@ -74,6 +84,7 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
     context,
     router,
     apiKeys,
+    platformKeys,
     maxBodyBytes: config.maxRequestBodyBytes,
   });
 
@@ -84,6 +95,7 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
     context,
     router,
     apiKeys,
+    platformKeys,
     server,
     seed,
 
@@ -119,7 +131,7 @@ function buildRouter(context: AppContext, config: AppConfig): Router {
           travaHoras: config.policies.lock.baseTtlMs / 3_600_000,
           travaTetoHoras: config.policies.lock.maxTotalMs / 3_600_000,
           recallHorasUteis: config.policies.recall.slaBusinessHours,
-          avaisNecessarios: config.policies.governance.requiredApprovals,
+          endossosRecomendados: config.policies.governance.recommendedEndorsements,
           fundadoras: config.policies.governance.founderCount,
         },
       }),

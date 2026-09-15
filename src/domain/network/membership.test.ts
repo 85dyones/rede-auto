@@ -4,12 +4,12 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_GOVERNANCE_POLICY,
   MembershipStatus,
-  VoteDecision,
   admitApprovedStore,
-  castVote,
+  admitCandidate,
+  endorse,
+  endorsementTally,
   openApplication,
-  rejectionThreshold,
-  tally,
+  rejectCandidate,
   withdrawApplication,
   type MembershipApplication,
 } from './membership.ts';
@@ -34,19 +34,18 @@ function pendingApplication(): MembershipApplication {
   ).state;
 }
 
-/** Aplica uma sequencia de votos de fundadores (por indice), parando no primeiro erro. */
-function voteSequence(
+/** Endossos de fundadoras, por indice. */
+function endorsedBy(
   application: MembershipApplication,
-  votes: ReadonlyArray<readonly [number, 'APPROVE' | 'REJECT']>,
+  indices: readonly number[],
 ): MembershipApplication {
   let current = application;
-  for (const [founderIndex, decision] of votes) {
+  for (const i of indices) {
     current = unwrap(
-      castVote({
+      endorse({
         application: current,
-        founderStore: network.founderAt(founderIndex),
-        user: network.principalAt(founderIndex),
-        decision,
+        founderStore: network.founderAt(i),
+        user: network.principalAt(i),
         now: NOW,
       }),
     ).state;
@@ -54,158 +53,179 @@ function voteSequence(
   return current;
 }
 
-describe('quorum de credenciamento (3 de 6 fundadores)', () => {
-  test('a candidatura nasce pendente, sem votos', () => {
-    const application = pendingApplication();
-    assert.equal(application.status, MembershipStatus.PENDING);
-    assert.equal(application.votes.length, 0);
-    assert.equal(tally(application).approvalsStillNeeded, 3);
+const OPERADOR = 'Operacao rede-auto';
+
+/** Caminho feliz completo: dois endossos e a plataforma admite. */
+function admitida(): MembershipApplication {
+  const comEndossos = endorsedBy(pendingApplication(), [1, 2]);
+  return unwrap(admitCandidate({ application: comEndossos, operator: OPERADOR, now: NOW })).state;
+}
+
+describe('endosso: sinal de qualidade, nao voto', () => {
+  test('endossar NAO credencia — a candidatura segue pendente', () => {
+    // E a diferenca inteira entre endosso e quorum. Se tres endossos
+    // credenciassem sozinhos, as fundadoras voltariam a ter poder de veto pela
+    // porta dos fundos: bastaria nao endossar ninguem.
+    const comTodos = endorsedBy(pendingApplication(), [1, 2, 3, 4, 5]);
+
+    assert.equal(comTodos.status, MembershipStatus.PENDING);
+    assert.equal(comTodos.endorsements.length, 5);
+    assert.equal(comTodos.decidedAt, null);
   });
 
-  test('dois avais ainda nao credenciam', () => {
-    const application = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-    ]);
-    assert.equal(application.status, MembershipStatus.PENDING);
-    assert.equal(tally(application).approvals, 2);
-    assert.equal(tally(application).approvalsStillNeeded, 1);
+  test('nao existe endosso contrario', () => {
+    // Quem tem restricao simplesmente nao endossa. Modelar rejeicao devolveria
+    // o veto — por isso `endorse` nao tem parametro de decisao.
+    const tally = endorsementTally(pendingApplication());
+    assert.equal(tally.endorsements, 0);
+    assert.equal(tally.meetsRecommendation, false);
   });
 
-  test('o terceiro aval aprova na hora, sem esperar os demais fundadores', () => {
-    const application = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-      [3, 'APPROVE'],
-    ]);
-    assert.equal(application.status, MembershipStatus.APPROVED);
-    assert.equal(application.decidedAt, NOW);
-    // Tres fundadores decidem: nao ha razao para bloquear a entrada aguardando
-    // os outros tres votarem.
-    assert.equal(application.votes.length, 3);
-  });
-
-  test('quatro votos contrarios reprovam, porque 3 avais viram impossiveis', () => {
-    assert.equal(rejectionThreshold(DEFAULT_GOVERNANCE_POLICY), 4);
-    const application = voteSequence(pendingApplication(), [
-      [1, 'REJECT'],
-      [2, 'REJECT'],
-      [3, 'REJECT'],
-    ]);
-    assert.equal(application.status, MembershipStatus.PENDING, 'com 3 contra ainda restam 3 a favor possiveis');
-
-    const rejected = voteSequence(application, [[4, 'REJECT']]);
-    assert.equal(rejected.status, MembershipStatus.REJECTED);
-  });
-
-  test('emite evento de aprovacao listando quem avalizou', () => {
-    const twoApprovals = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-    ]);
-    const third = unwrap(
-      castVote({
-        application: twoApprovals,
-        founderStore: network.founderAt(3),
-        user: network.principalAt(3),
-        decision: VoteDecision.APPROVE,
-        now: NOW,
-      }),
-    );
-
-    const approved = third.events.find((e) => e.type === 'membership.application_approved');
-    assert.ok(approved, 'evento de aprovacao deve ser emitido');
-    assert.deepEqual(approved.payload['approvedBy'], ['str_f2', 'str_f3', 'str_f4']);
-  });
-});
-
-describe('regras de voto', () => {
-  test('um fundador pode trocar o proprio voto enquanto a decisao nao saiu', () => {
-    const rejectedByOne = voteSequence(pendingApplication(), [[1, 'REJECT']]);
-    assert.equal(tally(rejectedByOne).rejections, 1);
-
-    const reconsidered = voteSequence(rejectedByOne, [[1, 'APPROVE']]);
-    assert.equal(reconsidered.votes.length, 1, 'o voto e substituido, nao somado');
-    assert.equal(tally(reconsidered).approvals, 1);
-    assert.equal(tally(reconsidered).rejections, 0);
-  });
-
-  test('votar duas vezes nao conta como dois avais', () => {
-    const application = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-    ]);
-    assert.equal(application.status, MembershipStatus.PENDING);
-    assert.equal(tally(application).approvals, 2);
-  });
-
-  test('a loja padrinho nao vota na propria indicacao', () => {
-    const result = castVote({
+  test('a padrinho nao endossa a propria indicacao', () => {
+    const result = endorse({
       application: pendingApplication(),
       founderStore: network.founderAt(0),
       user: network.principalAt(0),
-      decision: VoteDecision.APPROVE,
       now: NOW,
     });
+
     assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.error.code, 'SPONSOR_CANNOT_VOTE');
+    assert.equal(result.ok === false && result.error.code, 'SPONSOR_CANNOT_ENDORSE');
   });
 
-  test('loja nao fundadora nao vota', () => {
-    const member = { ...network.founderAt(1), kind: StoreKind.MEMBER };
-    const result = castVote({
+  test('endossar de novo atualiza a nota em vez de somar', () => {
+    const uma = endorsedBy(pendingApplication(), [1]);
+    const denovo = unwrap(
+      endorse({
+        application: uma,
+        founderStore: network.founderAt(1),
+        user: network.principalAt(1),
+        note: 'Conversei com o titular; segue valendo.',
+        now: NOW,
+      }),
+    ).state;
+
+    assert.equal(denovo.endorsements.length, 1, 'continua sendo uma fundadora');
+    assert.equal(denovo.endorsements[0]?.note, 'Conversei com o titular; segue valendo.');
+  });
+
+  test('loja que nao e fundadora ativa nao endossa', () => {
+    const suspensa = { ...network.founderAt(1), status: StoreStatus.SUSPENDED };
+    const result = endorse({
       application: pendingApplication(),
-      founderStore: member,
+      founderStore: suspensa,
       user: network.principalAt(1),
-      decision: VoteDecision.APPROVE,
       now: NOW,
     });
+
     assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.error.code, 'NOT_A_VOTING_FOUNDER');
+    assert.equal(result.ok === false && result.error.code, 'NOT_AN_ENDORSING_FOUNDER');
   });
 
-  test('vendedor de loja fundadora nao vota — o aval e do titular', () => {
-    const salesperson = buildUser(network.founderAt(1).id, { role: UserRole.SALESPERSON });
-    const result = castVote({
+  test('vendedor nao endossa, mesmo em loja fundadora', () => {
+    const vendedor = buildUser(network.founderAt(1).id, { role: UserRole.SALESPERSON });
+    const result = endorse({
       application: pendingApplication(),
       founderStore: network.founderAt(1),
-      user: salesperson,
-      decision: VoteDecision.APPROVE,
+      user: vendedor,
       now: NOW,
     });
+
     assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.error.code, 'NOT_A_VOTING_FOUNDER');
+    assert.equal(result.ok === false && result.error.code, 'NOT_AN_ENDORSING_FOUNDER');
   });
 
-  test('fundadora suspensa perde o direito de voto', () => {
-    const suspended = { ...network.founderAt(1), status: StoreStatus.SUSPENDED };
-    const result = castVote({
-      application: pendingApplication(),
-      founderStore: suspended,
-      user: network.principalAt(1),
-      decision: VoteDecision.APPROVE,
-      now: NOW,
-    });
-    assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.error.code, 'NOT_A_VOTING_FOUNDER');
+  test('a apuracao tira a padrinho do denominador', () => {
+    // Ela nao pode endossar, entao contar com ela deixaria o numero sempre
+    // inalcancavel por um.
+    const tally = endorsementTally(pendingApplication());
+    assert.equal(tally.foundersYetToEndorse, DEFAULT_GOVERNANCE_POLICY.founderCount - 1);
+  });
+});
+
+describe('a decisao e da plataforma', () => {
+  test('com o endosso recomendado, a plataforma admite', () => {
+    const decidida = admitida();
+
+    assert.equal(decidida.status, MembershipStatus.APPROVED);
+    assert.equal(decidida.decidedBy, OPERADOR);
+    assert.equal(decidida.endorsementOverride, null, 'nao houve excecao');
   });
 
-  test('candidatura ja decidida nao aceita mais votos', () => {
-    const approved = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-      [3, 'APPROVE'],
-    ]);
-    const late = castVote({
-      application: approved,
-      founderStore: network.founderAt(4),
-      user: network.principalAt(4),
-      decision: VoteDecision.REJECT,
+  test('abaixo do recomendado exige justificativa registrada', () => {
+    // A plataforma PODE admitir sem endosso — mas nao em silencio. Sem isso o
+    // endosso viraria enfeite.
+    const semEndosso = pendingApplication();
+    const result = admitCandidate({ application: semEndosso, operator: OPERADOR, now: NOW });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'ENDORSEMENT_BELOW_RECOMMENDED');
+  });
+
+  test('a excecao fica registrada na candidatura', () => {
+    const justificativa = 'Loja do mesmo grupo de uma fundadora; operacao ja conhecida.';
+    const decidida = unwrap(
+      admitCandidate({
+        application: pendingApplication(),
+        operator: OPERADOR,
+        endorsementOverride: justificativa,
+        now: NOW,
+      }),
+    ).state;
+
+    assert.equal(decidida.status, MembershipStatus.APPROVED);
+    assert.equal(decidida.endorsementOverride, justificativa);
+  });
+
+  test('recusar exige motivo: quem indicou precisa saber o que dizer', () => {
+    const semMotivo = rejectCandidate({
+      application: endorsedBy(pendingApplication(), [1, 2]),
+      operator: OPERADOR,
       now: NOW,
     });
-    assert.equal(late.ok, false);
-    assert.equal(late.ok === false && late.error.code, 'APPLICATION_ALREADY_DECIDED');
+    assert.equal(semMotivo.ok, false);
+    assert.equal(semMotivo.ok === false && semMotivo.error.code, 'REJECTION_NOTE_REQUIRED');
+
+    const comMotivo = unwrap(
+      rejectCandidate({
+        application: endorsedBy(pendingApplication(), [1, 2]),
+        operator: OPERADOR,
+        note: 'Pendencia cadastral no CNPJ da candidata.',
+        now: NOW,
+      }),
+    ).state;
+    assert.equal(comMotivo.status, MembershipStatus.REJECTED);
+    assert.equal(comMotivo.decisionNote, 'Pendencia cadastral no CNPJ da candidata.');
+  });
+
+  test('a plataforma pode recusar candidata com endosso de todas', () => {
+    // O endosso informa; nao obriga.
+    const todas = endorsedBy(pendingApplication(), [1, 2, 3, 4, 5]);
+    const recusada = unwrap(
+      rejectCandidate({
+        application: todas,
+        operator: OPERADOR,
+        note: 'Restricao documental que as fundadoras nao tinham como ver.',
+        now: NOW,
+      }),
+    ).state;
+
+    assert.equal(recusada.status, MembershipStatus.REJECTED);
+  });
+
+  test('candidatura ja decidida nao aceita novo endosso nem nova decisao', () => {
+    const decidida = admitida();
+
+    const tardio = endorse({
+      application: decidida,
+      founderStore: network.founderAt(3),
+      user: network.principalAt(3),
+      now: NOW,
+    });
+    assert.equal(tardio.ok === false && tardio.error.code, 'APPLICATION_ALREADY_DECIDED');
+
+    const denovo = admitCandidate({ application: decidida, operator: OPERADOR, now: NOW });
+    assert.equal(denovo.ok === false && denovo.error.code, 'APPLICATION_ALREADY_DECIDED');
   });
 });
 
@@ -227,12 +247,7 @@ describe('retirada e credenciamento efetivo', () => {
   });
 
   test('credenciamento cria loja MEMBER (sem voto) vinculada ao padrinho', () => {
-    const approved = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-      [3, 'APPROVE'],
-    ]);
-    const { store } = unwrap(admitApprovedStore(approved, asStoreId('str_new'), NOW));
+    const { store } = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), NOW));
 
     assert.equal(store.kind, StoreKind.MEMBER, 'quem entra depois nao vira fundador');
     assert.equal(store.status, StoreStatus.ACTIVE);
@@ -247,12 +262,7 @@ describe('retirada e credenciamento efetivo', () => {
   });
 
   test('credenciar duas vezes a mesma candidatura e bloqueado', () => {
-    const approved = voteSequence(pendingApplication(), [
-      [1, 'APPROVE'],
-      [2, 'APPROVE'],
-      [3, 'APPROVE'],
-    ]);
-    const first = unwrap(admitApprovedStore(approved, asStoreId('str_new'), NOW));
+    const first = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), NOW));
     const second = admitApprovedStore(first.application, asStoreId('str_other'), NOW);
     assert.equal(second.ok, false);
     assert.equal(second.ok === false && second.error.code, 'STORE_ALREADY_ADMITTED');

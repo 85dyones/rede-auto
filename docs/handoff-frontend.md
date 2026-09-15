@@ -532,8 +532,10 @@ as coisas por telefone.
 **Sincronização de feed** (`/feeds/sincronizacao`) — relatório com criados,
 atualizados, ausentes (com ação tomada) e recusados com motivo legível; é uma
 tela de diagnóstico, precisa dizer o que fazer com cada recusa.
-**Credenciamento** (`/credenciamentos`) — votação dos fundadores: 3 avais entre
-6 aprovam, 4 contrários reprovam. Raro e de alto peso institucional.
+**Credenciamento** (`/credenciamentos`) — fundadoras **endossam**, a plataforma
+decide. Não há voto contrário: quem tem restrição não endossa. A tela mostra os
+endossos, quantos faltam para o recomendado, e — quando houver — a justificativa
+da plataforma por ter admitido abaixo dele.
 
 ---
 
