@@ -888,7 +888,9 @@ describe('credenciamento: quem decide quem entra sao os membros', () => {
 
   test('o terceiro endosso credencia e a loja ja entra operando', async () => {
     const response = await api<{
-      situacao: string; lojaCredenciada: { id: string; tipo: string };
+      situacao: string;
+      empresaCredenciada: { id: string; tipo: string; lojas: number };
+      lojaCredenciada: { id: string; empresaId: string };
     }>('POST', `/api/v1/credenciamentos/${applicationId}/endossos`, {
       key: 'demo_norte_titular', body: {},
     });
@@ -898,10 +900,15 @@ describe('credenciamento: quem decide quem entra sao os membros', () => {
     // quem entrar na janela leva. Fechada a janela, a mesma candidatura com os
     // mesmos endossos viraria MEMBER — e o que `services.test.ts` cobre, porque
     // exige avancar o relogio em 90 dias sem arrastar o resto desta suite.
-    assert.equal(response.body.lojaCredenciada.tipo, 'FOUNDER');
+    assert.equal(response.body.empresaCredenciada.tipo, 'FOUNDER');
+    assert.equal(response.body.empresaCredenciada.lojas, 1, 'empresa nova nasce com um patio');
+    assert.equal(response.body.lojaCredenciada.empresaId, response.body.empresaCredenciada.id);
 
     const stores = await api<{ total: number }>('GET', '/api/v1/lojas', { key: PRIME });
-    assert.equal(stores.body.total, 11, '10 fundadoras do seed + a credenciada');
+    assert.equal(stores.body.total, 12, '11 patios do seed + o da credenciada');
+
+    const members = await api<{ total: number }>('GET', '/api/v1/empresas', { key: PRIME });
+    assert.equal(members.body.total, 11, '10 empresas do seed + a credenciada');
   });
 
   test('a apuracao conta as fundadoras da praca — inclusive a que acabou de entrar', async () => {
@@ -922,6 +929,101 @@ describe('credenciamento: quem decide quem entra sao os membros', () => {
 
     assert.equal(response.body.cluster.janelaDeFundacao.aberta, true);
     assert.ok(response.body.cluster.janelaDeFundacao.diasRestantes > 0);
+  });
+});
+
+describe('empresa e patio: a separacao que a tabela de precos exigiu', () => {
+  test('a empresa lista os patios que tem — e a contagem e a base da fatura', async () => {
+    const response = await api<{
+      total: number;
+      empresas: Array<{ id: string; razaoSocial: string; lojas: number; fundadora: boolean }>;
+    }>('GET', '/api/v1/empresas', { key: PRIME });
+
+    const prime = response.body.empresas.find((e) => e.razaoSocial.startsWith('Prime Motors'));
+    assert.equal(prime?.lojas, 2, 'matriz + Boqueirao: R$ 599 + R$ 159');
+    assert.equal(prime?.fundadora, true);
+
+    const outra = response.body.empresas.find((e) => e.razaoSocial.startsWith('Veloz'));
+    assert.equal(outra?.lojas, 1, 'so a primeira loja, inclusa nos R$ 599');
+  });
+
+  test('o patio nao carrega a condicao da empresa', async () => {
+    // `fundadora` e `tipo` saem so no DTO da empresa. Repetir na loja seria
+    // convidar as duas respostas a divergirem quando a empresa mudar de estado.
+    const response = await api<{ lojas: Array<Record<string, unknown>> }>(
+      'GET', '/api/v1/lojas', { key: PRIME },
+    );
+    const loja = response.body.lojas[0]!;
+    assert.equal('fundadora' in loja, false);
+    assert.equal('tipo' in loja, false);
+    assert.equal(typeof loja['empresaId'], 'string');
+  });
+
+  test('a filial do Boqueirao opera com a chave dela, sob a mesma empresa', async () => {
+    const matriz = await api<{ lojas: Array<{ id: string; empresaId: string; cnpj: string }> }>(
+      'GET', '/api/v1/lojas', { key: PRIME },
+    );
+    const prime = matriz.body.lojas.filter((l) => l.cnpj.startsWith('11.222.333'));
+    assert.equal(prime.length, 2);
+    assert.equal(prime[0]!.empresaId, prime[1]!.empresaId, 'mesma raiz de CNPJ, mesma empresa');
+
+    const catalogo = await api<{ total: number }>('GET', '/api/v1/veiculos', {
+      key: 'demo_prime_boqueirao',
+    });
+    assert.equal(catalogo.status, 200, 'a filial ve o catalogo da praca');
+  });
+
+  test('patio novo com raiz de CNPJ de outra empresa e recusado', async () => {
+    // Sem essa guarda, qualquer empresa entraria na rede pelo preco de uma
+    // filial e sem passar por endosso nenhum.
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/lojas', {
+      key: PRIME,
+      body: {
+        loja: {
+          legalName: 'Outra Empresa Veiculos LTDA',
+          tradeName: 'Outra Empresa',
+          cnpj: '02.558.157/0001-62',
+          city: 'Pinhais', state: 'PR',
+          phone: '(41) 3344-5566',
+          email: 'contato@outraempresa.com.br',
+          responsibleName: 'Ana Lima',
+        },
+      },
+    });
+
+    assert.equal(response.status, 422);
+    assert.equal(response.body.erro.codigo, 'BRANCH_CNPJ_MISMATCH');
+  });
+
+  test('vendedor nao abre patio: isso muda a mensalidade da empresa', async () => {
+    const response = await api('POST', '/api/v1/lojas', {
+      key: PRIME_VENDEDOR,
+      body: { loja: { cnpj: '11.222.333/0003-43' } },
+    });
+    assert.equal(response.status, 403);
+  });
+
+  test('empresa ja na rede nao entra por candidatura — abre patio', async () => {
+    const response = await api<{ erro: { codigo: string } }>(
+      'POST', '/api/v1/credenciamentos',
+      {
+        key: VELOZ,
+        body: {
+          candidata: {
+            legalName: 'Prime Motors Filial LTDA',
+            tradeName: 'Prime Motors Filial',
+            cnpj: '11.222.333/0004-24',
+            city: 'Curitiba', state: 'PR',
+            phone: '(41) 3344-7788',
+            email: 'filial@prime.com.br',
+            responsibleName: 'Paulo Prado',
+          },
+        },
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.erro.codigo, 'COMPANY_ALREADY_IN_NETWORK');
   });
 });
 

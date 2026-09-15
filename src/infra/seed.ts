@@ -10,8 +10,9 @@
  * desenvolvimento — e o motivo pelo qual `SEED_DEMO_DATA=false` desliga tudo.
  */
 
-import { StoreKind, StoreStatus, UserRole, type NetworkUser, type Store } from '../domain/network/store.ts';
-import { asClusterId, asStoreId, asUserId, asVehicleId } from '../domain/shared/ids.ts';
+import { StoreStatus, UserRole, type NetworkUser, type Store } from '../domain/network/store.ts';
+import { MemberKind, memberFromFirstStore, type Member } from '../domain/network/member.ts';
+import { asClusterId, asMemberId, asStoreId, asUserId, asVehicleId } from '../domain/shared/ids.ts';
 import {
   type Cluster,
   ClusterStatus,
@@ -28,16 +29,29 @@ import {
   VehicleAngle,
   createVehicle,
 } from '../domain/vehicle/vehicle.ts';
-import type { AppContext } from '../application/context.ts';
+import type { Actor, AppContext } from '../application/context.ts';
 import type { ApiKeyRegistry } from './auth/api-keys.ts';
 
 export type SeededStore = {
+  readonly member: Member;
   readonly store: Store;
   readonly principal: NetworkUser;
   readonly salesperson: NetworkUser;
   readonly principalApiKey: string;
   readonly salespersonApiKey: string;
 };
+
+/**
+ * O ator de um patio semeado. Existe porque montar `{ member, store, user }` na
+ * mao em cada teste e no roteiro convida ao erro que o tipo passou a impedir:
+ * juntar a loja de uma empresa com o membro de outra.
+ */
+export function seededActor(
+  seeded: SeededStore,
+  role: 'principal' | 'salesperson' = 'principal',
+): Actor {
+  return { member: seeded.member, store: seeded.store, user: seeded[role] };
+}
 
 export type SeedResult = {
   readonly cluster: Cluster;
@@ -204,24 +218,37 @@ export async function seedFoundingNetwork(
 
   for (const [index, founder] of FOUNDERS.entries()) {
     const storeId = asStoreId(`str_${founder.slug}`);
+    const memberId = asMemberId(`mbr_${founder.slug}`);
+    const profile = {
+      legalName: `${founder.tradeName} Comercio de Veiculos LTDA`,
+      tradeName: founder.tradeName,
+      cnpj: founder.cnpj,
+      city: founder.city,
+      state: founder.state,
+      phone: `4132${String(index).padStart(2, '0')}4455`,
+      email: `contato@${founder.slug}.com.br`,
+      responsibleName: `Titular ${founder.tradeName}`,
+    };
+
+    // Uma empresa por fundadora, com um patio. A Prime ganha um segundo patio
+    // depois do laco — e o unico jeito de o piloto exercitar a linha de R$ 159.
+    const member = memberFromFirstStore(
+      memberId,
+      cluster.id,
+      profile,
+      MemberKind.FOUNDER,
+      null,
+      now,
+    );
+
     const store: Store = {
       id: storeId,
+      memberId,
       clusterId: cluster.id,
-      profile: {
-        legalName: `${founder.tradeName} Comercio de Veiculos LTDA`,
-        tradeName: founder.tradeName,
-        cnpj: founder.cnpj,
-        city: founder.city,
-        state: founder.state,
-        phone: `4132${String(index).padStart(2, '0')}4455`,
-        email: `contato@${founder.slug}.com.br`,
-        responsibleName: `Titular ${founder.tradeName}`,
-      },
-      kind: StoreKind.FOUNDER,
+      profile,
       status: StoreStatus.ACTIVE,
       joinedAt: now,
       tradeInDefault: founder.tradeInDefault,
-      sponsorStoreId: null,
     };
 
     const principal: NetworkUser = {
@@ -241,6 +268,7 @@ export async function seedFoundingNetwork(
       active: true,
     };
 
+    await context.repos.members.save(member);
     await context.repos.stores.save(store);
     await context.repos.users.save(principal);
     await context.repos.users.save(salesperson);
@@ -254,8 +282,45 @@ export async function seedFoundingNetwork(
       label: `${founder.tradeName} / vendedor`,
     });
 
-    stores.push({ store, principal, salesperson, principalApiKey, salespersonApiKey });
+    stores.push({ member, store, principal, salesperson, principalApiKey, salespersonApiKey });
   }
+
+  // O segundo patio da Prime. Existe para o piloto exercitar o caso que a
+  // tabela de precos criou: R$ 599 pela empresa com a primeira loja inclusa,
+  // R$ 159 por esta. Sem uma empresa de duas lojas no seed, o unico caminho
+  // testado seria o de uma loja por empresa — que e justamente o modelo antigo.
+  const matriz = stores[0]!;
+  const segundoPatio: Store = {
+    id: asStoreId('str_prime_boqueirao'),
+    memberId: matriz.member.id,
+    clusterId: cluster.id,
+    profile: {
+      ...matriz.store.profile,
+      tradeName: 'Prime Motors Boqueirao',
+      // Mesma raiz, ordem diferente: e assim que filial se identifica no Brasil.
+      cnpj: '11222333000262',
+      city: 'Curitiba',
+    },
+    status: StoreStatus.ACTIVE,
+    joinedAt: now,
+    tradeInDefault: matriz.store.tradeInDefault,
+  };
+  await context.repos.stores.save(segundoPatio);
+
+  const gerenteBoqueirao: NetworkUser = {
+    id: asUserId('usr_prime_boqueirao_gerente'),
+    storeId: segundoPatio.id,
+    name: 'Gerente Prime Boqueirao',
+    email: 'boqueirao@prime.com.br',
+    role: UserRole.MANAGER,
+    active: true,
+  };
+  await context.repos.users.save(gerenteBoqueirao);
+  apiKeys.register('demo_prime_boqueirao', {
+    storeId: segundoPatio.id,
+    userId: gerenteBoqueirao.id,
+    label: 'Prime Motors Boqueirao / gerente',
+  });
 
   const vehicles: Vehicle[] = [];
   if (options.includeVehicles === false) return { cluster, stores, vehicles };

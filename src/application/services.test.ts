@@ -5,15 +5,16 @@ import { buildApplication, type Application } from '../bootstrap.ts';
 import { loadConfig } from '../config.ts';
 import { DAY, FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
+import { seededActor } from '../infra/seed.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import { FuelType, TradeInStance, TransmissionType } from '../domain/vehicle/vehicle.ts';
-import { asClusterId, asStoreId, asUserId } from '../domain/shared/ids.ts';
+import { asClusterId, asMemberId, asStoreId, asUserId } from '../domain/shared/ids.ts';
 import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody.ts';
 import type { Actor } from './context.ts';
 import { loadVehicle, openCommercialLock, registerVehicle, searchCatalog } from './inventory-service.ts';
 import { startCustodyTransfer } from './custody-service.ts';
 import { endorseApplication, submitApplication, viewApplication } from './governance-service.ts';
-import { StoreKind, StoreStatus, type Store } from '../domain/network/store.ts';
+import { MemberKind, MemberStatus, type Member } from '../domain/network/member.ts';
 import { runSweep, startSweeper } from './scheduler.ts';
 
 /** Termo com as cinco fotos obrigatorias — o minimo que a custodia exige. */
@@ -63,8 +64,8 @@ async function novaApp(): Promise<{ app: Application; clock: FakeClock; lojaA: A
   return {
     app,
     clock,
-    lojaA: { store: seed.stores[0]!.store, user: seed.stores[0]!.principal },
-    lojaB: { store: seed.stores[1]!.store, user: seed.stores[1]!.principal },
+    lojaA: seededActor(seed.stores[0]!),
+    lojaB: seededActor(seed.stores[1]!),
   };
 }
 
@@ -234,9 +235,21 @@ describe('fronteira entre pracas', () => {
     const londrina = asClusterId('clu_londrina');
 
     const forasteira: Actor = {
-      store: { ...base.lojaB.store, id: asStoreId('str_forasteira'), clusterId: londrina },
+      member: {
+        ...base.lojaB.member,
+        id: asMemberId('mbr_forasteira'),
+        cnpjRoot: '99887766',
+        clusterId: londrina,
+      },
+      store: {
+        ...base.lojaB.store,
+        id: asStoreId('str_forasteira'),
+        memberId: asMemberId('mbr_forasteira'),
+        clusterId: londrina,
+      },
       user: { ...base.lojaB.user, id: asUserId('usr_forasteira'), storeId: asStoreId('str_forasteira') },
     };
+    await base.app.context.repos.members.save(forasteira.member);
     await base.app.context.repos.stores.save(forasteira.store);
     await base.app.context.repos.users.save(forasteira.user);
 
@@ -302,18 +315,18 @@ describe('fronteira entre pracas', () => {
     await app.stop();
   });
 
-  test('fundadora de uma praca nao conta no quorum da outra', async () => {
+  test('fundadora de uma praca nao conta no rol da outra', async () => {
     const { app, curitiba, londrina } = await duasPracas();
 
-    const deCuritiba = await app.context.repos.stores.founders(curitiba);
-    const deLondrina = await app.context.repos.stores.founders(londrina);
+    const deCuritiba = await app.context.repos.members.founders(curitiba);
+    const deLondrina = await app.context.repos.members.founders(londrina);
 
     assert.equal(deCuritiba.length, 10, 'as 10 fundadoras do piloto');
-    assert.equal(deLondrina.length, 1, 'Londrina constitui o proprio quorum');
+    assert.equal(deLondrina.length, 1, 'Londrina constitui a propria fundacao');
 
-    const emCuritiba = new Set(deCuritiba.map((loja) => loja.id));
-    for (const loja of deLondrina) {
-      assert.ok(!emCuritiba.has(loja.id), 'nenhuma fundadora vota nas duas pracas');
+    const emCuritiba = new Set(deCuritiba.map((empresa) => empresa.id));
+    for (const empresa of deLondrina) {
+      assert.ok(!emCuritiba.has(empresa.id), 'nenhuma fundadora endossa nas duas pracas');
     }
     await app.stop();
   });
@@ -347,34 +360,42 @@ describe('janela de fundacao: quem entrar na janela, leva', () => {
     responsibleName: 'Joao Pereira',
   };
 
-  /** Apresenta a candidata pela loja 0 e junta os tres endossos das lojas 1..3. */
-  async function credenciar(app: Application): Promise<Store> {
+  /** Apresenta a candidata pela empresa 0 e junta os tres endossos das 1..3. */
+  async function credenciar(app: Application): Promise<Member> {
     const seed = app.seed!;
-    const ator = (i: number): Actor => ({ store: seed.stores[i]!.store, user: seed.stores[i]!.principal });
 
-    const aberta = await submitApplication(app.context, ator(0), candidata);
+    const aberta = await submitApplication(app.context, seededActor(seed.stores[0]!), candidata);
     assert.ok(aberta.ok);
 
     let ultima = aberta;
     for (const i of [1, 2, 3]) {
-      const passo = await endorseApplication(app.context, ator(i), aberta.value.application.id);
+      const passo = await endorseApplication(
+        app.context,
+        seededActor(seed.stores[i]!),
+        aberta.value.application.id,
+      );
       assert.ok(passo.ok);
       ultima = passo;
     }
 
     assert.equal(ultima.value.application.status, 'APPROVED');
-    assert.ok(ultima.value.admittedStore !== null, 'o terceiro endosso ja credencia');
-    return ultima.value.admittedStore;
+    assert.ok(ultima.value.admittedMember !== null, 'o terceiro endosso ja credencia');
+    return ultima.value.admittedMember;
   }
 
-  test('credenciada dentro da janela, a loja nasce FUNDADORA', async () => {
+  test('credenciada dentro da janela, a EMPRESA nasce FUNDADORA', async () => {
     const { app } = await novaApp();
 
-    const loja = await credenciar(app);
-    assert.equal(loja.kind, StoreKind.FOUNDER);
+    const empresa = await credenciar(app);
+    assert.equal(empresa.kind, MemberKind.FOUNDER);
 
-    const fundadoras = await app.context.repos.stores.founders(loja.clusterId);
+    const fundadoras = await app.context.repos.members.founders(empresa.clusterId);
     assert.equal(fundadoras.length, 11, 'o rol cresce — e por isso que ele e contado, nao declarado');
+
+    // E nasce com exatamente um patio: os seguintes sao `openBranch`, e e la
+    // que a linha de R$ 159 aparece.
+    const patios = await app.context.repos.stores.byMember(empresa.id);
+    assert.equal(patios.length, 1);
     await app.stop();
   });
 
@@ -386,10 +407,10 @@ describe('janela de fundacao: quem entrar na janela, leva', () => {
     // tres endossos, mesmas fundadoras.
     clock.set(praca.foundingWindowEndsAt + DAY);
 
-    const loja = await credenciar(app);
-    assert.equal(loja.kind, StoreKind.MEMBER);
+    const empresa = await credenciar(app);
+    assert.equal(empresa.kind, MemberKind.MEMBER);
 
-    const fundadoras = await app.context.repos.stores.founders(loja.clusterId);
+    const fundadoras = await app.context.repos.members.founders(empresa.clusterId);
     assert.equal(fundadoras.length, 10, 'o rol de fundadoras esta fechado');
     await app.stop();
   });
@@ -397,9 +418,8 @@ describe('janela de fundacao: quem entrar na janela, leva', () => {
   test('a apuracao acompanha a praca em vez de repetir um numero de politica', async () => {
     const { app } = await novaApp();
     const seed = app.seed!;
-    const ator = (i: number): Actor => ({ store: seed.stores[i]!.store, user: seed.stores[i]!.principal });
 
-    const aberta = await submitApplication(app.context, ator(0), candidata);
+    const aberta = await submitApplication(app.context, seededActor(seed.stores[0]!), candidata);
     assert.ok(aberta.ok);
     // 10 fundadoras, menos a padrinho.
     assert.equal(aberta.value.tally.foundersYetToEndorse, 9);
@@ -407,8 +427,13 @@ describe('janela de fundacao: quem entrar na janela, leva', () => {
 
     // Suspender fundadoras tira cada uma da conta: quem nao pode endossar nao
     // deve aparecer como se pudesse.
+    // Suspensao da EMPRESA: e ela que endossa, e e ela que a inadimplencia
+    // atinge. Fechar o patio nao tira o endosso de quem esta em dia.
     for (const i of [1, 2, 3, 4, 5, 6, 7]) {
-      await app.context.repos.stores.save({ ...seed.stores[i]!.store, status: StoreStatus.SUSPENDED });
+      await app.context.repos.members.save({
+        ...seed.stores[i]!.member,
+        status: MemberStatus.SUSPENDED,
+      });
     }
 
     const revista = await viewApplication(app.context, aberta.value.application.id);

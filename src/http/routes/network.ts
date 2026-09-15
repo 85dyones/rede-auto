@@ -1,11 +1,17 @@
 /**
- * Rotas de rede e governanca: lojas, credenciamento e votacao dos fundadores.
+ * Rotas de rede e governanca: empresas, patios e credenciamento.
+ *
+ * A distincao aparece na URL: `/empresas` e quem paga e endossa, `/lojas` sao
+ * os patios. Quem abre um patio novo faz POST em `/lojas` — nao ha candidatura,
+ * porque as fundadoras ja responderam pela empresa.
  */
 
 import { notFoundError } from '../../domain/shared/errors.ts';
 import { asApplicationId } from '../../domain/shared/ids.ts';
 import type { AppContext } from '../../application/context.ts';
+import type { ApplicationView } from '../../application/governance-service.ts';
 import {
+  openStoreBranch,
   retireApplication,
   submitApplication,
   viewApplication,
@@ -13,9 +19,19 @@ import {
 } from '../../application/governance-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
-import { applicationDto, clusterDto, storeDto } from '../serialize.ts';
+import { applicationDto, clusterDto, memberDto, storeDto } from '../serialize.ts';
 import { asObject, optionalText } from '../parse.ts';
 import { requireActor } from './support.ts';
+
+/**
+ * Empresa e patio andam juntos no DTO ou nenhum dos dois aparece: uma resposta
+ * com loja credenciada e empresa nula obrigaria o cliente a tratar um estado
+ * que o dominio nao produz.
+ */
+const admittedPair = (view: ApplicationView) =>
+  view.admittedMember === null || view.admittedStore === null
+    ? null
+    : { member: view.admittedMember, store: view.admittedStore };
 
 export function registerNetworkRoutes(router: Router, context: AppContext): void {
   /** As lojas da **sua** praca. Nao existe "todas as lojas da instalacao". */
@@ -45,17 +61,56 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     return json(200, { cluster: clusterDto(cluster, context.clock.now()) });
   });
 
-  router.get('/api/v1/lojas/fundadoras', async (request) => {
+  /**
+   * Abre mais um patio da empresa do ator. E a operacao que a linha de R$ 159
+   * cobra. Sem endosso: as fundadoras ja responderam pela empresa.
+   */
+  router.post('/api/v1/lojas', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const result = await openStoreBranch(context, actor.value, body.value['loja'] ?? body.value);
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(201, {
+      loja: storeDto(result.value.store),
+      lojasDaEmpresa: result.value.storeCount,
+    });
+  });
+
+  /** As empresas da sua praca — quem paga, quem endossa, quem foi suspensa. */
+  router.get('/api/v1/empresas', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const members = await context.repos.members.byCluster(actor.value.member.clusterId);
+    const dtos = [];
+    for (const member of members) {
+      const stores = await context.repos.stores.byMember(member.id);
+      dtos.push(memberDto(member, stores.length));
+    }
+    return json(200, { total: dtos.length, empresas: dtos });
+  });
+
+  router.get('/api/v1/empresas/fundadoras', async (request) => {
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
     // `total` vem da contagem, nunca de politica: quantas fundadoras a praca tem
     // depende de quem entrou antes de a janela de fundacao fechar.
-    const founders = await context.repos.stores.founders(actor.value.store.clusterId);
+    const founders = await context.repos.members.founders(actor.value.member.clusterId);
+    const dtos = [];
+    for (const member of founders) {
+      const stores = await context.repos.stores.byMember(member.id);
+      dtos.push(memberDto(member, stores.length));
+    }
     return json(200, {
-      total: founders.length,
+      total: dtos.length,
       endossosParaCredenciar: context.policies.governance.requiredEndorsements,
-      lojas: founders.map(storeDto),
+      empresas: dtos,
     });
   });
 
@@ -75,7 +130,7 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
   router.get('/api/v1/credenciamentos/:id', async (request) => {
     const result = await viewApplication(context, asApplicationId(request.params['id'] as string));
     if (!result.ok) return errorResponse(result.error, request.requestId);
-    return json(200, applicationDto(result.value.application, result.value.tally, result.value.admittedStore));
+    return json(200, applicationDto(result.value.application, result.value.tally, admittedPair(result.value)));
   });
 
   router.get('/api/v1/credenciamentos', async (request) => {
@@ -110,7 +165,7 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     );
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
-    return json(200, applicationDto(result.value.application, result.value.tally, result.value.admittedStore));
+    return json(200, applicationDto(result.value.application, result.value.tally, admittedPair(result.value)));
   });
 
   router.delete('/api/v1/credenciamentos/:id', async (request) => {

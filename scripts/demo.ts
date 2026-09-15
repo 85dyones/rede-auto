@@ -49,6 +49,7 @@ import { downloadMaterial, publishMaterial } from '../src/application/material-s
 import { sealTerm, TransferPurpose, PhotoAngle } from '../src/domain/custody/custody.ts';
 import { VehicleAngle } from '../src/domain/vehicle/vehicle.ts';
 import { foundingWindowDaysLeft } from '../src/domain/cluster/cluster.ts';
+import { seededActor } from '../src/infra/seed.ts';
 import { EvidenceType } from '../src/domain/lock/evidence.ts';
 import { RecallReason } from '../src/domain/recall/recall.ts';
 import { SettlementMethod, TradeInDestination } from '../src/domain/deal/deal.ts';
@@ -155,12 +156,12 @@ const context = app.context;
 const seed = app.seed;
 if (seed === null) throw new Error('a demonstracao precisa da rede semeada');
 
-const lojaA: Actor = { store: seed.stores[0]!.store, user: seed.stores[0]!.principal };
-const lojaAVendedor: Actor = { store: seed.stores[0]!.store, user: seed.stores[0]!.salesperson };
-const lojaB: Actor = { store: seed.stores[1]!.store, user: seed.stores[1]!.principal };
-const lojaBVendedor: Actor = { store: seed.stores[1]!.store, user: seed.stores[1]!.salesperson };
-const lojaC: Actor = { store: seed.stores[2]!.store, user: seed.stores[2]!.principal };
-const lojaD: Actor = { store: seed.stores[3]!.store, user: seed.stores[3]!.principal };
+const lojaA: Actor = seededActor(seed.stores[0]!);
+const lojaAVendedor: Actor = seededActor(seed.stores[0]!, 'salesperson');
+const lojaB: Actor = seededActor(seed.stores[1]!);
+const lojaBVendedor: Actor = seededActor(seed.stores[1]!, 'salesperson');
+const lojaC: Actor = seededActor(seed.stores[2]!);
+const lojaD: Actor = seededActor(seed.stores[3]!);
 
 console.log('\n=============================================================');
 console.log('  REDE-AUTO — demonstracao da operacao ponta a ponta');

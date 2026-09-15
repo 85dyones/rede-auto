@@ -14,6 +14,7 @@ import type {
   CustodyTransferId,
   DealId,
   LockId,
+  MemberId,
   RecallId,
   StoreId,
   UserId,
@@ -23,6 +24,7 @@ import type { Instant } from '../../domain/shared/clock.ts';
 import type { DomainEvent } from '../../domain/shared/events.ts';
 import type { Cluster } from '../../domain/cluster/cluster.ts';
 import type { NetworkUser, Store } from '../../domain/network/store.ts';
+import type { Member } from '../../domain/network/member.ts';
 import type { MembershipApplication } from '../../domain/network/membership.ts';
 import type { Vehicle } from '../../domain/vehicle/vehicle.ts';
 import { CommercialStatus } from '../../domain/vehicle/vehicle.ts';
@@ -41,18 +43,35 @@ export type ClusterRepository = {
   all(): Promise<Cluster[]>;
 };
 
+export type MemberRepository = {
+  save(member: Member): Promise<void>;
+  byId(id: MemberId): Promise<Member | undefined>;
+  /**
+   * A raiz do CNPJ e unica na instalacao inteira, nao por praca: a mesma
+   * empresa em duas redes locais seria um tunel de estoque entre elas,
+   * exatamente o que a fronteira existe para impedir.
+   */
+  byCnpjRoot(root: string): Promise<Member | undefined>;
+  byCluster(clusterId: ClusterId): Promise<Member[]>;
+  /**
+   * Empresas fundadoras **desta** praca. Contadas, nunca declaradas: quantas
+   * existem depende de quem entrou antes de a janela de fundacao fechar.
+   */
+  founders(clusterId: ClusterId): Promise<Member[]>;
+};
+
 export type StoreRepository = {
   save(store: Store): Promise<void>;
   byId(id: StoreId): Promise<Store | undefined>;
-  /**
-   * CNPJ e unico na instalacao inteira, nao por praca: a mesma loja em duas
-   * redes locais seria um tunel de estoque entre elas, exatamente o que a
-   * fronteira existe para impedir.
-   */
+  /** O CNPJ do patio (14 digitos) e unico na instalacao. */
   byCnpj(cnpj: string): Promise<Store | undefined>;
   byCluster(clusterId: ClusterId): Promise<Store[]>;
-  /** Fundadoras **desta** praca. Sem cluster nao existe quorum. */
-  founders(clusterId: ClusterId): Promise<Store[]>;
+  /**
+   * Os patios de uma empresa. E a base de calculo da mensalidade: o primeiro
+   * esta incluso, os demais somam. Contagem, nao campo — um `storeCount` no
+   * membro seria o mesmo erro do antigo `founderCount`.
+   */
+  byMember(memberId: MemberId): Promise<Store[]>;
 };
 
 export type UserRepository = {
@@ -160,6 +179,7 @@ export type NotificationRepository = {
 
 export type Repositories = {
   readonly clusters: ClusterRepository;
+  readonly members: MemberRepository;
   readonly stores: StoreRepository;
   readonly users: UserRepository;
   readonly memberships: MembershipRepository;
@@ -223,9 +243,33 @@ class InMemoryStoreRepository implements StoreRepository {
   async byCluster(clusterId: ClusterId): Promise<Store[]> {
     return [...this.#byId.values()].filter((store) => store.clusterId === clusterId).map(clone);
   }
-  async founders(clusterId: ClusterId): Promise<Store[]> {
+  async byMember(memberId: MemberId): Promise<Store[]> {
+    return [...this.#byId.values()].filter((store) => store.memberId === memberId).map(clone);
+  }
+}
+
+class InMemoryMemberRepository implements MemberRepository {
+  readonly #byId = new Map<string, Member>();
+
+  async save(member: Member): Promise<void> {
+    this.#byId.set(member.id, clone(member));
+  }
+  async byId(id: MemberId): Promise<Member | undefined> {
+    const found = this.#byId.get(id);
+    return found === undefined ? undefined : clone(found);
+  }
+  async byCnpjRoot(root: string): Promise<Member | undefined> {
+    for (const member of this.#byId.values()) {
+      if (member.cnpjRoot === root) return clone(member);
+    }
+    return undefined;
+  }
+  async byCluster(clusterId: ClusterId): Promise<Member[]> {
+    return [...this.#byId.values()].filter((m) => m.clusterId === clusterId).map(clone);
+  }
+  async founders(clusterId: ClusterId): Promise<Member[]> {
     return [...this.#byId.values()]
-      .filter((store) => store.kind === 'FOUNDER' && store.clusterId === clusterId)
+      .filter((m) => m.kind === 'FOUNDER' && m.clusterId === clusterId)
       .map(clone);
   }
 }
@@ -505,6 +549,7 @@ class InMemoryNotificationRepository implements NotificationRepository {
 export function createInMemoryRepositories(): Repositories {
   return {
     clusters: new InMemoryClusterRepository(),
+    members: new InMemoryMemberRepository(),
     stores: new InMemoryStoreRepository(),
     users: new InMemoryUserRepository(),
     memberships: new InMemoryMembershipRepository(),

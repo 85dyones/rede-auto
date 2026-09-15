@@ -183,7 +183,13 @@ async function resolveActor(
   const user = await dependencies.context.repos.users.byId(record.userId);
   if (store === undefined || user === undefined) return null;
 
-  return { store, user };
+  // Sem empresa nao ha ator. Uma loja orfa e estado invalido, e responder como
+  // se a chave nao existisse e a resposta certa: seguir sem o membro faria toda
+  // checagem de inadimplencia passar por default.
+  const member = await dependencies.context.repos.members.byId(store.memberId);
+  if (member === undefined) return null;
+
+  return { member, store, user };
 }
 
 /** Le o corpo com teto de tamanho; devolve `null` se o limite for excedido. */

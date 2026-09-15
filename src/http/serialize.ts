@@ -19,6 +19,7 @@ import {
   withinFoundingWindow,
 } from '../domain/cluster/cluster.ts';
 import type { Store } from '../domain/network/store.ts';
+import { type Member, formatCnpjRoot } from '../domain/network/member.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
 import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
 import type { Vehicle } from '../domain/vehicle/vehicle.ts';
@@ -58,19 +59,42 @@ export function clusterDto(cluster: Cluster, now: Instant) {
   };
 }
 
+/**
+ * A empresa contratante. `lojas` e contagem, nao campo: e a base de calculo da
+ * mensalidade (a primeira inclusa, as demais somam), e um numero guardado no
+ * membro seria o mesmo erro do antigo `founderCount`.
+ */
+export function memberDto(member: Member, storeCount: number) {
+  return {
+    id: member.id,
+    razaoSocial: member.legalName,
+    cnpjRaiz: formatCnpjRoot(member.cnpjRoot),
+    responsavel: member.responsibleName,
+    tipo: member.kind,
+    fundadora: member.kind === 'FOUNDER',
+    situacao: member.status,
+    entrouEm: instant(member.joinedAt),
+    apadrinhadaPor: member.sponsorMemberId,
+    lojas: storeCount,
+  };
+}
+
+/**
+ * O patio. Sem `tipo`/`fundadora`: isso e da empresa, e repetir aqui seria
+ * convidar as duas respostas a divergirem. Quem precisa da condicao da empresa
+ * pede a empresa.
+ */
 export function storeDto(store: Store) {
   return {
     id: store.id,
+    empresaId: store.memberId,
     nomeFantasia: store.profile.tradeName,
     razaoSocial: store.profile.legalName,
     cnpj: formatCnpj(store.profile.cnpj),
     cidade: store.profile.city,
     uf: store.profile.state,
-    tipo: store.kind,
     situacao: store.status,
-    fundadora: store.kind === 'FOUNDER',
     entrouEm: instant(store.joinedAt),
-    apadrinhadaPor: store.sponsorStoreId,
   };
 }
 
@@ -373,7 +397,11 @@ export function dealDto(deal: Deal, viewerStoreId: StoreId) {
   };
 }
 
-export function applicationDto(application: MembershipApplication, tally: EndorsementTally, admitted: Store | null) {
+export function applicationDto(
+  application: MembershipApplication,
+  tally: EndorsementTally,
+  admitted: { member: Member; store: Store } | null,
+) {
   return {
     id: application.id,
     candidata: {
@@ -384,7 +412,7 @@ export function applicationDto(application: MembershipApplication, tally: Endors
       uf: application.candidate.state,
       responsavel: application.candidate.responsibleName,
     },
-    apadrinhadaPorLojaId: application.sponsorStoreId,
+    apadrinhadaPorEmpresaId: application.sponsorMemberId,
     situacao: application.status,
     abertaEm: instant(application.openedAt),
     decididaEm: instant(application.decidedAt),
@@ -399,11 +427,16 @@ export function applicationDto(application: MembershipApplication, tally: Endors
       alcancavel: tally.reachable,
     },
     endossos: application.endorsements.map((e) => ({
-      fundadoraId: e.founderStoreId,
+      fundadoraEmpresaId: e.founderMemberId,
+      assinadoNaLojaId: e.givenByStoreId,
       em: instant(e.givenAt),
       justificativa: e.note,
     })),
-    lojaCredenciada: admitted === null ? null : storeDto(admitted),
+    // Empresa E patio: o credenciamento cria os dois, e quem chamou precisa
+    // dos dois — a condicao de fundadora esta na empresa, o patio e onde se
+    // opera. A contagem de lojas e 1 por construcao: a empresa acabou de nascer.
+    empresaCredenciada: admitted === null ? null : memberDto(admitted.member, 1),
+    lojaCredenciada: admitted === null ? null : storeDto(admitted.store),
   };
 }
 

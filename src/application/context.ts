@@ -12,11 +12,20 @@ import type { IdGenerator } from '../domain/shared/ids.ts';
 import { type EventBus, type DomainEvent } from '../domain/shared/events.ts';
 import type { StoreId, UserId } from '../domain/shared/ids.ts';
 import type { NetworkUser, Store } from '../domain/network/store.ts';
+import type { Member } from '../domain/network/member.ts';
 import type { NetworkPolicies } from '../config.ts';
 import type { Repositories } from '../infra/persistence/repositories.ts';
 
-/** Quem esta executando a acao: a loja e a pessoa dentro dela. */
+/**
+ * Quem esta executando a acao: a empresa, o patio dela e a pessoa dentro dele.
+ *
+ * O membro entra no ator, e nao e buscado onde precisa, porque quase toda
+ * autorizacao passou a depender das duas camadas — `canTransact(store, member)`.
+ * Deixar o membro de fora obrigaria cada servico a busca-lo, e a primeira
+ * chamada que esquecesse deixaria uma empresa inadimplente operando.
+ */
 export type Actor = {
+  readonly member: Member;
   readonly store: Store;
   readonly user: NetworkUser;
 };

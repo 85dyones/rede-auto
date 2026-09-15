@@ -11,6 +11,7 @@ declare const brand: unique symbol;
 export type Branded<T, B extends string> = T & { readonly [brand]: B };
 
 export type ClusterId = Branded<string, 'ClusterId'>;
+export type MemberId = Branded<string, 'MemberId'>;
 export type StoreId = Branded<string, 'StoreId'>;
 export type UserId = Branded<string, 'UserId'>;
 export type VehicleId = Branded<string, 'VehicleId'>;
@@ -26,6 +27,7 @@ export type AuditEntryId = Branded<string, 'AuditEntryId'>;
 
 export const IdPrefix = {
   cluster: 'clu',
+  member: 'mbr',
   store: 'str',
   user: 'usr',
   vehicle: 'veh',
@@ -69,6 +71,7 @@ export function sequentialIdGenerator(): IdGenerator {
 // Construtores nominais. Sao apenas casts, mas centralizam o ponto onde uma
 // string "crua" (vinda de HTTP, de um feed, do banco) vira um id tipado.
 export const asClusterId = (value: string): ClusterId => value as ClusterId;
+export const asMemberId = (value: string): MemberId => value as MemberId;
 export const asStoreId = (value: string): StoreId => value as StoreId;
 export const asUserId = (value: string): UserId => value as UserId;
 export const asVehicleId = (value: string): VehicleId => value as VehicleId;

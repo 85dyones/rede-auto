@@ -16,7 +16,7 @@ import type { Instant } from '../domain/shared/clock.ts';
 import { formatDuration } from '../domain/shared/clock.ts';
 import type { ClusterId, StoreId } from '../domain/shared/ids.ts';
 import type { Store } from '../domain/network/store.ts';
-import { StoreKind, StoreStatus } from '../domain/network/store.ts';
+import { StoreStatus } from '../domain/network/store.ts';
 import type { AppContext } from './context.ts';
 
 export const NotificationSeverity = {
@@ -287,13 +287,19 @@ async function resolveTargets(context: AppContext, draft: Draft): Promise<StoreI
   const broadcast = draft.broadcast;
   if (broadcast === undefined || broadcast.clusterId === undefined) return [];
 
-  const stores = broadcast.foundersOnly
-    ? await context.repos.stores.founders(broadcast.clusterId)
-    : await context.repos.stores.byCluster(broadcast.clusterId);
+  const stores = await context.repos.stores.byCluster(broadcast.clusterId);
+
+  // "So fundadoras" e uma pergunta sobre a EMPRESA, respondida no rol de
+  // fundadoras da praca — nao um campo da loja. O aviso chega a todos os patios
+  // dela: a filial que recebe uma candidatura para endossar e tao capaz de
+  // levar o assunto ao titular quanto a matriz.
+  const foundingMemberIds = broadcast.foundersOnly
+    ? new Set((await context.repos.members.founders(broadcast.clusterId)).map((m) => m.id))
+    : null;
 
   return stores
     .filter((store: Store) => store.status === StoreStatus.ACTIVE)
-    .filter((store: Store) => !broadcast.foundersOnly || store.kind === StoreKind.FOUNDER)
+    .filter((store: Store) => foundingMemberIds === null || foundingMemberIds.has(store.memberId))
     .map((store: Store) => store.id)
     .filter((id) => !excluded.has(id));
 }

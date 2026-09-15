@@ -303,6 +303,7 @@ export async function openCommercialLock(
     lockId: asLockId(context.ids.next('lck')),
     vehicle: loaded.value.vehicle,
     holderStore: actor.store,
+    holderMember: actor.member,
     holderUser: actor.user,
     customerReference: input.customerReference,
     now: context.clock.now(),

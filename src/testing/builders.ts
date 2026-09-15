@@ -11,10 +11,16 @@ import {
   type NetworkUser,
   type Store,
   type StoreProfile,
-  StoreKind,
   StoreStatus,
   UserRole,
 } from '../domain/network/store.ts';
+import {
+  type Member,
+  MemberKind,
+  MemberStatus,
+  cnpjRootOf,
+  memberFromFirstStore,
+} from '../domain/network/member.ts';
 import {
   type Cluster,
   ClusterStatus,
@@ -22,6 +28,7 @@ import {
 } from '../domain/cluster/cluster.ts';
 import {
   asClusterId,
+  asMemberId,
   asStoreId,
   asUserId,
   type ClusterId,
@@ -106,14 +113,47 @@ export function buildStoreProfile(overrides: Partial<StoreProfile> = {}): StoreP
 export function buildStore(overrides: Partial<Store> = {}): Store {
   return {
     id: overrides.id ?? asStoreId(`str_${Math.random().toString(36).slice(2, 10)}`),
+    memberId: overrides.memberId ?? asMemberId(`mbr_${Math.random().toString(36).slice(2, 10)}`),
     clusterId: overrides.clusterId ?? TEST_CLUSTER_ID,
     profile: overrides.profile ?? buildStoreProfile(),
-    kind: overrides.kind ?? StoreKind.FOUNDER,
     status: overrides.status ?? StoreStatus.ACTIVE,
     tradeInDefault: overrides.tradeInDefault ?? TradeInStance.CONSIDERS,
     joinedAt: overrides.joinedAt ?? 0,
-    sponsorStoreId: overrides.sponsorStoreId ?? null,
   };
+}
+
+export function buildMember(overrides: Partial<Member> = {}): Member {
+  const profile = buildStoreProfile();
+  return {
+    id: overrides.id ?? asMemberId(`mbr_${Math.random().toString(36).slice(2, 10)}`),
+    clusterId: overrides.clusterId ?? TEST_CLUSTER_ID,
+    legalName: overrides.legalName ?? profile.legalName,
+    cnpjRoot: overrides.cnpjRoot ?? cnpjRootOf(profile.cnpj),
+    responsibleName: overrides.responsibleName ?? profile.responsibleName,
+    email: overrides.email ?? profile.email,
+    phone: overrides.phone ?? profile.phone,
+    kind: overrides.kind ?? MemberKind.FOUNDER,
+    status: overrides.status ?? MemberStatus.ACTIVE,
+    joinedAt: overrides.joinedAt ?? 0,
+    sponsorMemberId: overrides.sponsorMemberId ?? null,
+  };
+}
+
+/**
+ * Empresa e patio casados, que e como eles existem de verdade. Um `buildStore`
+ * solto tem `memberId` aleatorio e por isso reprova em `canTransact` — o que e
+ * o comportamento certo, e este par existe para o teste que nao quer prova-lo.
+ */
+export function buildMemberWithStore(
+  overrides: { member?: Partial<Member>; store?: Partial<Store> } = {},
+): { member: Member; store: Store } {
+  const member = buildMember(overrides.member);
+  const store = buildStore({
+    ...overrides.store,
+    memberId: member.id,
+    clusterId: member.clusterId,
+  });
+  return { member, store };
 }
 
 export function buildUser(storeId: StoreId, overrides: Partial<NetworkUser> = {}): NetworkUser {
@@ -128,8 +168,14 @@ export function buildUser(storeId: StoreId, overrides: Partial<NetworkUser> = {}
 }
 
 export type FoundingNetwork = {
+  /** As EMPRESAS fundadoras: a unidade que endossa e que paga. */
+  readonly members: readonly Member[];
+  /** Um patio de cada, na mesma ordem. */
   readonly founders: readonly Store[];
   readonly principals: readonly NetworkUser[];
+  memberAt(index: number): Member;
+  /** A empresa de um patio. Poupa o teste de casar indices na mao. */
+  memberOf(store: Store): Member;
   founderAt(index: number): Store;
   principalAt(index: number): NetworkUser;
 };
@@ -164,6 +210,7 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
     ['Salvador', 'BA'],
   ];
 
+  const members: Member[] = [];
   const founders: Store[] = [];
   const principals: NetworkUser[] = [];
 
@@ -171,22 +218,27 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
     const tradeName = names[index] ?? `Loja Fundadora ${index + 1}`;
     const [city, state] = cities[index] ?? (['Campinas', 'SP'] as const);
     const storeId = asStoreId(`str_f${index + 1}`);
+    const memberId = asMemberId(`mbr_f${index + 1}`);
+    const profile = buildStoreProfile({
+      tradeName,
+      legalName: `${tradeName} Comercio de Veiculos LTDA`,
+      city,
+      state,
+      email: `contato@${slug(tradeName)}.com.br`,
+      responsibleName: `Titular ${index + 1}`,
+    });
+
+    members.push(
+      memberFromFirstStore(memberId, TEST_CLUSTER_ID, profile, MemberKind.FOUNDER, null, 0),
+    );
     founders.push({
       id: storeId,
+      memberId,
       clusterId: TEST_CLUSTER_ID,
       tradeInDefault: TradeInStance.CONSIDERS,
-      profile: buildStoreProfile({
-        tradeName,
-        legalName: `${tradeName} Comercio de Veiculos LTDA`,
-        city,
-        state,
-        email: `contato@${slug(tradeName)}.com.br`,
-        responsibleName: `Titular ${index + 1}`,
-      }),
-      kind: StoreKind.FOUNDER,
+      profile,
       status: StoreStatus.ACTIVE,
       joinedAt: 0,
-      sponsorStoreId: null,
     });
     principals.push({
       id: asUserId(`usr_f${index + 1}`),
@@ -199,8 +251,15 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
   }
 
   return {
+    members,
     founders,
     principals,
+    memberAt: (index) => members[index] as Member,
+    memberOf: (store) => {
+      const found = members.find((m) => m.id === store.memberId);
+      if (found === undefined) throw new Error(`patio sem empresa na rede de teste: ${store.id}`);
+      return found;
+    },
     founderAt: (index) => founders[index] as Store,
     principalAt: (index) => principals[index] as NetworkUser,
   };

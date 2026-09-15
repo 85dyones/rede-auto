@@ -43,17 +43,23 @@ import {
 import { type DomainEvent, domainEvent } from '../shared/events.ts';
 import { type Transition, transitioned, unchanged } from '../shared/transition.ts';
 import { type Instant, DAY } from '../shared/clock.ts';
-import type { ClusterId, ApplicationId, StoreId, UserId } from '../shared/ids.ts';
+import type { ClusterId, ApplicationId, MemberId, StoreId, UserId } from '../shared/ids.ts';
 import { TradeInStance } from '../vehicle/vehicle.ts';
 import {
   type NetworkUser,
   type Store,
   type StoreProfile,
-  StoreKind,
   canEndorseMembership,
   canTransact,
-  isFounderOf,
 } from './store.ts';
+import {
+  type Member,
+  MemberKind,
+  cnpjRootOf,
+  isFoundingMemberOf,
+  memberFromFirstStore,
+  memberInGoodStanding,
+} from './member.ts';
 import { type Cluster, requireSameCluster, withinFoundingWindow } from '../cluster/cluster.ts';
 
 export const MembershipStatus = {
@@ -72,7 +78,14 @@ export type MembershipStatus = (typeof MembershipStatus)[keyof typeof Membership
  * negativa: quem tem restricao nao endossa, e o silencio ja diz.
  */
 export type Endorsement = {
-  readonly founderStoreId: StoreId;
+  /**
+   * A EMPRESA que endossou — e a unidade de contagem. Se fosse o patio, um
+   * grupo com tres lojas credenciaria sozinho, e "tres endossos" pararia de
+   * significar tres empresas respondendo por uma quarta.
+   */
+  readonly founderMemberId: MemberId;
+  /** De qual patio o titular assinou. Nao conta; serve para a auditoria. */
+  readonly givenByStoreId: StoreId;
   readonly givenByUserId: UserId;
   readonly givenAt: Instant;
   /** Por que essa fundadora responde por essa candidata. */
@@ -87,9 +100,15 @@ export type MembershipApplication = {
    * quorum de 3 e contado dentro de uma praca so.
    */
   readonly clusterId: ClusterId;
+  /**
+   * A ficha da candidata: uma so, da empresa **e** do primeiro patio. Uma
+   * empresa entra na rede com exatamente um patio; os seguintes sao operacao
+   * posterior. Pedir duas fichas na entrada seria pedir a mesma coisa duas
+   * vezes e abrir a porta para elas divergirem.
+   */
   readonly candidate: StoreProfile;
-  /** Loja da rede que apresentou a candidata. Responde pela indicacao. */
-  readonly sponsorStoreId: StoreId;
+  /** Empresa da rede que apresentou a candidata. Responde pela indicacao. */
+  readonly sponsorMemberId: MemberId;
   readonly openedAt: Instant;
   readonly status: MembershipStatus;
   /** No maximo um endosso por fundadora; endossar de novo atualiza a nota. */
@@ -165,23 +184,23 @@ export type EndorsementTally = {
  */
 export function endorsementTally(
   application: MembershipApplication,
-  activeFounders: readonly Store[],
+  activeFounders: readonly Member[],
   policy: GovernancePolicy = DEFAULT_GOVERNANCE_POLICY,
 ): EndorsementTally {
   const endorsements = application.endorsements.length;
   const stillNeeded = Math.max(0, policy.requiredEndorsements - endorsements);
-  const jaEndossaram = new Set(application.endorsements.map((e) => e.founderStoreId));
+  const jaEndossaram = new Set(application.endorsements.map((e) => e.founderMemberId));
 
-  // O filtro espelha `canEndorseMembership` de proposito, menos o papel do
-  // usuario: se a apuracao usasse um criterio proprio, ela contaria como
-  // disponivel uma fundadora que `endorse` vai recusar. Fundadora suspensa nao
-  // endossa; de outra praca, tampouco; e a padrinho nao endossa a propria
+  // O filtro espelha `canEndorseMembership` de proposito, menos o patio e o
+  // papel do usuario: se a apuracao usasse criterio proprio, contaria como
+  // disponivel uma fundadora que `endorse` vai recusar. Empresa inadimplente
+  // nao endossa; de outra praca, tampouco; e a padrinho nao endossa a propria
   // indicacao.
   const podemAinda = activeFounders.filter(
     (founder) =>
-      isFounderOf(founder, application.clusterId) &&
-      canTransact(founder) &&
-      founder.id !== application.sponsorStoreId &&
+      isFoundingMemberOf(founder, application.clusterId) &&
+      memberInGoodStanding(founder) &&
+      founder.id !== application.sponsorMemberId &&
       !jaEndossaram.has(founder.id),
   ).length;
 
@@ -202,19 +221,26 @@ export function endorsementTally(
 export type OpenApplicationCommand = {
   readonly id: ApplicationId;
   readonly candidate: StoreProfile;
-  readonly sponsor: Store;
+  /** O patio de onde a indicacao partiu. Quem responde por ela e a empresa. */
+  readonly sponsorStore: Store;
+  readonly sponsor: Member;
   readonly now: Instant;
 };
 
 export function openApplication(
   command: OpenApplicationCommand,
 ): Transition<MembershipApplication> {
-  if (!canTransact(command.sponsor)) {
+  if (!canTransact(command.sponsorStore, command.sponsor)) {
     return err(
       forbiddenError(
         'SPONSOR_NOT_ACTIVE',
-        'Apenas uma loja ativa da rede pode apresentar uma candidata.',
-        { sponsorStoreId: command.sponsor.id, status: command.sponsor.status },
+        'Apenas uma empresa em dia, por um patio aberto, pode apresentar uma candidata.',
+        {
+          sponsorMemberId: command.sponsor.id,
+          memberStatus: command.sponsor.status,
+          sponsorStoreId: command.sponsorStore.id,
+          storeStatus: command.sponsorStore.status,
+        },
       ),
     );
   }
@@ -223,7 +249,7 @@ export function openApplication(
     id: command.id,
     clusterId: command.sponsor.clusterId,
     candidate: command.candidate,
-    sponsorStoreId: command.sponsor.id,
+    sponsorMemberId: command.sponsor.id,
     openedAt: command.now,
     status: MembershipStatus.PENDING,
     endorsements: [],
@@ -236,13 +262,16 @@ export function openApplication(
       clusterId: application.clusterId,
       candidateCnpj: application.candidate.cnpj,
       candidateTradeName: application.candidate.tradeName,
-      sponsorStoreId: application.sponsorStoreId,
+      sponsorMemberId: application.sponsorMemberId,
     }),
   ]);
 }
 
 export type EndorseCommand = {
   readonly application: MembershipApplication;
+  /** A empresa fundadora que endossa. E ela que conta. */
+  readonly founder: Member;
+  /** O patio de onde o titular assinou. Registrado, nao contado. */
   readonly founderStore: Store;
   readonly user: NetworkUser;
   readonly note?: string | undefined;
@@ -256,12 +285,13 @@ export type EndorseCommand = {
  * candidatura para corrigir uma nota criaria atrito onde o produto existe para
  * remove-lo.
  *
- * Endossar NAO decide nada: a candidatura continua PENDING ate a plataforma se
- * manifestar.
+ * "De novo" e por EMPRESA, nao por patio: o titular da filial que endossa
+ * depois do titular da matriz esta atualizando a nota da mesma empresa, nao
+ * somando um segundo aval.
  */
 export function endorse(command: EndorseCommand): Transition<MembershipApplication> {
   const policy = command.policy ?? DEFAULT_GOVERNANCE_POLICY;
-  const { application, founderStore, user } = command;
+  const { application, founder, founderStore, user } = command;
 
   if (application.status !== MembershipStatus.PENDING) {
     return err(
@@ -273,24 +303,26 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
     );
   }
 
-  if (!canEndorseMembership(founderStore, user)) {
+  if (!canEndorseMembership(founderStore, founder, user, application.clusterId)) {
     return err(
       forbiddenError(
         'NOT_AN_ENDORSING_FOUNDER',
-        'Somente o titular de uma loja fundadora ativa endossa credenciamento.',
-        { storeId: founderStore.id, storeKind: founderStore.kind, role: user.role },
+        'Somente o titular de uma empresa fundadora em dia, por um patio aberto, ' +
+          'endossa credenciamento.',
+        { memberId: founder.id, memberKind: founder.kind, storeId: founderStore.id, role: user.role },
       ),
     );
   }
 
   // A padrinho nao endossa a propria indicacao: endosso de quem apresentou nao
-  // acrescenta informacao nenhuma sobre a candidata.
-  if (founderStore.id === application.sponsorStoreId) {
+  // acrescenta informacao nenhuma sobre a candidata. Comparado por EMPRESA — a
+  // filial da padrinho tambem nao endossa.
+  if (founder.id === application.sponsorMemberId) {
     return err(
       ruleViolation(
         'SPONSOR_CANNOT_ENDORSE',
-        'A loja que apresentou a candidatura nao endossa — o endosso precisa vir de outra fundadora.',
-        { applicationId: application.id, sponsorStoreId: application.sponsorStoreId },
+        'A empresa que apresentou a candidatura nao endossa — o endosso precisa vir de outra fundadora.',
+        { applicationId: application.id, sponsorMemberId: application.sponsorMemberId },
       ),
     );
   }
@@ -301,15 +333,18 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
   }
 
   const endorsement: Endorsement = {
-    founderStoreId: founderStore.id,
+    founderMemberId: founder.id,
+    givenByStoreId: founderStore.id,
     givenByUserId: user.id,
     givenAt: command.now,
     note: note !== undefined && note.length > 0 ? note : null,
   };
 
-  const previous = application.endorsements.find((e) => e.founderStoreId === founderStore.id);
+  // Substitui por EMPRESA, nao por patio: sem isso um grupo com tres lojas
+  // credenciaria uma candidata sozinho, assinando de cada patio.
+  const previous = application.endorsements.find((e) => e.founderMemberId === founder.id);
   const endorsements = [
-    ...application.endorsements.filter((e) => e.founderStoreId !== founderStore.id),
+    ...application.endorsements.filter((e) => e.founderMemberId !== founder.id),
     endorsement,
   ];
 
@@ -325,7 +360,8 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
   const events: DomainEvent[] = [
     domainEvent('membership.endorsed', application.id, command.now, {
       clusterId: application.clusterId,
-      founderStoreId: founderStore.id,
+      founderMemberId: founder.id,
+      givenByStoreId: founderStore.id,
       updatedPreviousEndorsement: previous !== undefined,
       endorsements: total,
       stillNeeded,
@@ -348,7 +384,7 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
       candidateCnpj: application.candidate.cnpj,
       candidateTradeName: application.candidate.tradeName,
       endorsements: total,
-      endorsedBy: endorsements.map((e) => e.founderStoreId),
+      endorsedBy: endorsements.map((e) => e.founderMemberId),
     }),
   );
 
@@ -390,7 +426,7 @@ export function lapseApplication(
     domainEvent('membership.application_lapsed', application.id, now, {
       clusterId: application.clusterId,
       candidateTradeName: application.candidate.tradeName,
-      sponsorStoreId: application.sponsorStoreId,
+      sponsorMemberId: application.sponsorMemberId,
       endorsements: application.endorsements.length,
       required: policy.requiredEndorsements,
     }),
@@ -399,7 +435,7 @@ export function lapseApplication(
 
 export type WithdrawApplicationCommand = {
   readonly application: MembershipApplication;
-  readonly requestedByStoreId: StoreId;
+  readonly requestedByMemberId: MemberId;
   readonly now: Instant;
 };
 
@@ -417,11 +453,11 @@ export function withdrawApplication(
       ),
     );
   }
-  if (command.requestedByStoreId !== application.sponsorStoreId) {
+  if (command.requestedByMemberId !== application.sponsorMemberId) {
     return err(
       forbiddenError(
         'NOT_THE_SPONSOR',
-        'Somente a loja que apresentou a candidatura pode retira-la.',
+        'Somente a empresa que apresentou a candidatura pode retira-la.',
         { applicationId: application.id },
       ),
     );
@@ -434,22 +470,33 @@ export function withdrawApplication(
 }
 
 /**
- * Efetiva a loja aprovada. Separado do endosso de proposito: credenciar e um
- * ato de governanca, criar a loja e um ato de provisionamento (id, usuarios,
- * chaves de acesso), e os dois falham por motivos diferentes.
+ * Efetiva a candidata: cria a EMPRESA e o primeiro patio dela, juntos.
+ *
+ * Separado do endosso de proposito: credenciar e ato de governanca, provisionar
+ * e ato de infraestrutura (ids, usuarios, chaves), e os dois falham por motivos
+ * diferentes. Se este passo falhar, os endossos continuam valendo.
+ *
+ * Empresa e loja nascem na mesma funcao porque nao existe uma sem a outra: uma
+ * empresa credenciada sem patio nao opera e nao paga a linha de R$ 159 de
+ * ninguem, e um patio sem empresa nao tem contrato. Devolver as duas de uma vez
+ * e o que impede o estado intermediario de existir.
  *
  * O `cluster` e parametro obrigatorio, e nao um id: e ele quem decide se a
- * loja nasce FUNDADORA ou MEMBRO, porque so ele sabe quando a janela de
+ * empresa nasce FUNDADORA ou MEMBRO, porque so ele sabe quando a janela de
  * fundacao fecha. Exigi-lo aqui faz o compilador apontar toda chamada que
  * precisaria ser revista — o mesmo remedio ja usado em `dealDto(deal, viewer)`
  * e em `loadVehicle(actor)`.
  */
-export function admitApprovedStore(
+export function admitApprovedMember(
   application: MembershipApplication,
+  newMemberId: MemberId,
   newStoreId: StoreId,
   cluster: Cluster,
   now: Instant,
-): Result<{ store: Store; application: MembershipApplication }, DomainError> {
+): Result<
+  { member: Member; store: Store; application: MembershipApplication },
+  DomainError
+> {
   if (application.status !== MembershipStatus.APPROVED) {
     return err(
       conflictError(
@@ -472,22 +519,95 @@ export function admitApprovedStore(
   if (!mesmaPraca.ok) return mesmaPraca;
 
   // Quem entrar na janela de fundacao, leva. Nao ha campo dizendo por que esta
-  // loja e fundadora: `joinedAt` contra `foundingWindowEndsAt` ja responde, e um
-  // segundo registro do mesmo fato so existiria para divergir do primeiro.
-  const fundadora = withinFoundingWindow(cluster, now);
+  // empresa e fundadora: `joinedAt` contra `foundingWindowEndsAt` ja responde, e
+  // um segundo registro do mesmo fato so existiria para divergir do primeiro.
+  const kind = withinFoundingWindow(cluster, now) ? MemberKind.FOUNDER : MemberKind.MEMBER;
+
+  const member = memberFromFirstStore(
+    newMemberId,
+    application.clusterId,
+    application.candidate,
+    kind,
+    application.sponsorMemberId,
+    now,
+  );
 
   const store: Store = {
     id: newStoreId,
+    memberId: member.id,
     clusterId: application.clusterId,
     profile: application.candidate,
-    kind: fundadora ? StoreKind.FOUNDER : StoreKind.MEMBER,
     status: 'ACTIVE',
     joinedAt: now,
     tradeInDefault: TradeInStance.CONSIDERS,
-    sponsorStoreId: application.sponsorStoreId,
   };
 
-  return ok({ store, application: { ...application, resultingStoreId: newStoreId } });
+  return ok({ member, store, application: { ...application, resultingStoreId: newStoreId } });
+}
+
+// ---------------------------------------------------------------------------
+// Patio adicional
+// ---------------------------------------------------------------------------
+
+export type OpenBranchCommand = {
+  readonly member: Member;
+  readonly profile: StoreProfile;
+  readonly newStoreId: StoreId;
+  readonly now: Instant;
+};
+
+/**
+ * Abre mais um patio de uma empresa ja credenciada. E a operacao que a linha de
+ * R$ 159 cobra.
+ *
+ * Nao passa por endosso, e isso e deliberado: as fundadoras ja responderam pela
+ * EMPRESA. Exigir tres endossos para a filial de quem ja esta dentro seria
+ * pedir que avalizassem de novo o que ja avalizaram, e na pratica so
+ * emperraria o crescimento de quem a rede quer que cresca.
+ *
+ * O que a funcao guarda e a identidade: a raiz do CNPJ tem de bater. Sem isso,
+ * "patio adicional" viraria a porta dos fundos para credenciar uma empresa
+ * inteira sem passar por endosso nenhum — pelo preco de uma filial.
+ */
+export function openBranch(
+  command: OpenBranchCommand,
+): Result<Store, DomainError> {
+  const { member, profile } = command;
+
+  if (!memberInGoodStanding(member)) {
+    return err(
+      forbiddenError(
+        'MEMBER_NOT_IN_GOOD_STANDING',
+        'Empresa suspensa ou desligada nao abre patio novo.',
+        { memberId: member.id, status: member.status },
+      ),
+    );
+  }
+
+  if (cnpjRootOf(profile.cnpj) !== member.cnpjRoot) {
+    return err(
+      ruleViolation(
+        'BRANCH_CNPJ_MISMATCH',
+        'O CNPJ deste patio nao pertence a esta empresa: a raiz precisa ser a mesma. ' +
+          'Empresa diferente entra por candidatura, com endossos.',
+        {
+          memberId: member.id,
+          expectedRoot: member.cnpjRoot,
+          receivedRoot: cnpjRootOf(profile.cnpj),
+        },
+      ),
+    );
+  }
+
+  return ok({
+    id: command.newStoreId,
+    memberId: member.id,
+    clusterId: member.clusterId,
+    profile,
+    status: 'ACTIVE',
+    joinedAt: command.now,
+    tradeInDefault: TradeInStance.CONSIDERS,
+  });
 }
 
 function translateStatus(status: MembershipStatus): string {

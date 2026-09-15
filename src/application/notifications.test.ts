@@ -7,6 +7,7 @@ import { buildApplication, type Application } from '../bootstrap.ts';
 import { loadConfig } from '../config.ts';
 import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
+import { seededActor } from '../infra/seed.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import {
   FuelType,
@@ -128,9 +129,9 @@ describe('entrega das notificacoes', () => {
     return {
       app,
       clock,
-      lojaA: { store: seed.stores[0]!.store, user: seed.stores[0]!.principal },
-      lojaB: { store: seed.stores[1]!.store, user: seed.stores[1]!.principal },
-      lojaC: { store: seed.stores[2]!.store, user: seed.stores[2]!.principal },
+      lojaA: seededActor(seed.stores[0]!),
+      lojaB: seededActor(seed.stores[1]!),
+      lojaC: seededActor(seed.stores[2]!),
     };
   }
 

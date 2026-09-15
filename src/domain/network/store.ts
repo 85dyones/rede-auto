@@ -1,37 +1,35 @@
 /**
- * Loja participante da rede e seus usuarios.
+ * Loja: o PATIO de uma empresa credenciada, e os usuarios que trabalham nele.
  *
- * A rede e fechada e qualificada: nao existe autocadastro. Uma loja so passa a
- * existir como membro depois de endossada por fundadoras da praca (ver
- * `membership.ts`).
+ * O que e da empresa mora em `member.ts` — ser fundadora, endossar, pagar,
+ * ser suspensa por inadimplencia. O que fica aqui e o que so pode ser de um
+ * patio: custodia, estoque, trava, vistoria. Quem responde pelo carro e quem
+ * esta com ele, e isso nao se reparte entre filiais.
  *
- * Quem e fundadora nao e uma lista fechada na constituicao: e quem foi
- * credenciado enquanto a janela de fundacao do cluster estava aberta. Por isso
- * nenhum lugar do sistema declara quantas fundadoras existem — pergunta-se ao
- * repositorio (`stores.founders(clusterId)`).
+ * A rede e fechada: nao existe autocadastro. Uma loja so passa a existir
+ * porque a empresa dela foi endossada (ver `membership.ts`) ou porque uma
+ * empresa ja credenciada abriu mais um patio.
  */
 
 import { type Result, ok, err, combine } from '../shared/result.ts';
 import { type DomainError, validationError } from '../shared/errors.ts';
 import type { Instant } from '../shared/clock.ts';
-import type { ClusterId, StoreId, UserId } from '../shared/ids.ts';
+import type { ClusterId, MemberId, StoreId, UserId } from '../shared/ids.ts';
 import { parseCnpj, requireText, requireOneOf } from '../shared/validation.ts';
 import { TradeInStance } from '../vehicle/vehicle.ts';
-
-export const StoreKind = {
-  /**
-   * Entrou dentro da janela de fundacao da praca. Endossa candidaturas e paga
-   * adesao reduzida. Quantas existem e um fato contado, nao um numero fixado.
-   */
-  FOUNDER: 'FOUNDER',
-  /** Credenciada depois de fechada a janela. Opera igual; nao endossa. */
-  MEMBER: 'MEMBER',
-} as const;
-export type StoreKind = (typeof StoreKind)[keyof typeof StoreKind];
+import { type Member, isFoundingMemberOf, memberInGoodStanding } from './member.ts';
 
 export const StoreStatus = {
   ACTIVE: 'ACTIVE',
-  /** Suspensa: nao anuncia nem trava veiculos, mas segue responsavel pela custodia que detem. */
+  /**
+   * Suspensa por QUEBRA DE PROTOCOLO de entrega ou retirada — sancao do patio,
+   * medida pelo que este patio fez. Nao anuncia nem trava veiculos, mas segue
+   * responsavel pela custodia que ja detem: o carro de terceiro nao vira refem
+   * da sancao.
+   *
+   * Inadimplencia nao entra aqui: e da empresa, e suspende todas as lojas dela
+   * de uma vez (`MemberStatus.SUSPENDED`).
+   */
   SUSPENDED: 'SUSPENDED',
   EXITED: 'EXITED',
 } as const;
@@ -42,7 +40,7 @@ export const UserRole = {
   SALESPERSON: 'SALESPERSON',
   /** Tudo do vendedor + preco liquido, aceite de transbordo, recall, custodia. */
   MANAGER: 'MANAGER',
-  /** Tudo do gerente + endosso de credenciamento (apenas em loja fundadora). */
+  /** Tudo do gerente + endosso de credenciamento (apenas em empresa fundadora). */
   PRINCIPAL: 'PRINCIPAL',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -66,12 +64,21 @@ export type StoreProfile = {
 export type Store = {
   readonly id: StoreId;
   /**
+   * A empresa dona deste patio. Imutavel: um patio nao troca de empresa — ele
+   * fecha e outro abre, com CNPJ proprio.
+   *
+   * Redundante com `clusterId`? Nao: o membro e que tem praca, e a loja herda.
+   * Guardar os dois evita uma consulta em toda guarda de fronteira, ao custo de
+   * um invariante — `store.clusterId === member.clusterId` — que so
+   * `openBranch` e a admissao podem criar, e nenhum dos dois aceita divergir.
+   */
+  readonly memberId: MemberId;
+  /**
    * A praca a que esta loja pertence. Imutavel: mudar de cluster nao e editar
-   * um campo — e sair de uma rede e se credenciar em outra, com quorum novo.
+   * um campo — e sair de uma rede e se credenciar em outra, com endossos novos.
    */
   readonly clusterId: ClusterId;
   readonly profile: StoreProfile;
-  readonly kind: StoreKind;
   readonly status: StoreStatus;
   readonly joinedAt: Instant;
   /**
@@ -82,8 +89,6 @@ export type Store = {
    * `CONSIDERS` na constituicao porque e o comportamento que ja existia.
    */
   readonly tradeInDefault: TradeInStance;
-  /** Quem apadrinhou a candidatura. `null` para as fundadoras. */
-  readonly sponsorStoreId: StoreId | null;
 };
 
 export type NetworkUser = {
@@ -157,39 +162,47 @@ export function formatPhone(digits: string): string {
 // Predicados de autorizacao
 // ---------------------------------------------------------------------------
 
-export function isFounder(store: Store): boolean {
-  return store.kind === StoreKind.FOUNDER;
-}
-
 /**
- * Fundadora **desta** praca. O sufixo existe porque `isFounder` sozinho vira
- * uma pergunta perigosa quando ha mais de um cluster: fundadora de Curitiba nao
- * endossa candidata de Londrina.
- */
-export function isFounderOf(store: Store, clusterId: ClusterId): boolean {
-  return isFounder(store) && store.clusterId === clusterId;
-}
-
-export function canTransact(store: Store): boolean {
-  return store.status === StoreStatus.ACTIVE;
-}
-
-/**
- * Endossar credenciamento exige loja fundadora ativa e usuario titular.
- * Concentrar a regra aqui evita reimplementa-la em cada rota.
+ * A loja pode operar?
  *
- * O endosso decide: o terceiro credencia, sem passo da plataforma no meio. O
- * que a fundadora faz aqui e colocar a reputacao dela atras de uma candidata que
- * ela conhece de praca.
+ * Duas condicoes, e as duas sao obrigatorias no tipo. `member` nao tem valor
+ * padrao de proposito: a pergunta "esta loja pode transacionar?" deixou de ter
+ * resposta olhando so para a loja no dia em que a inadimplencia passou a ser da
+ * empresa. Um parametro opcional aqui significaria que metade das chamadas
+ * responderia a pergunta antiga sem ninguem perceber — e a metade errada seria
+ * justamente a que deixa empresa inadimplente operando pela filial.
+ *
+ * O compilador apontou as chamadas. E o mesmo remedio de `loadVehicle(actor)`.
+ */
+export function canTransact(store: Store, member: Member): boolean {
+  return (
+    store.status === StoreStatus.ACTIVE &&
+    memberInGoodStanding(member) &&
+    store.memberId === member.id
+  );
+}
+
+/**
+ * Endossar credenciamento exige EMPRESA fundadora em dia, patio aberto e
+ * usuario titular. Concentrar a regra aqui evita reimplementa-la em cada rota.
+ *
+ * O endosso e da empresa, exercido pelo titular de qualquer patio dela. Se
+ * fosse do patio, um grupo com tres lojas credenciaria uma candidata sozinho —
+ * e "tres endossos" deixaria de significar tres empresas respondendo por uma
+ * quarta. `endorse` ainda barra o segundo endosso da mesma empresa, mas a regra
+ * comeca aqui.
+ *
+ * O endosso decide: o terceiro credencia, sem passo da plataforma no meio.
  */
 export function canEndorseMembership(
   store: Store,
+  member: Member,
   user: NetworkUser,
-  clusterId: ClusterId = store.clusterId,
+  clusterId: ClusterId = member.clusterId,
 ): boolean {
   return (
-    isFounderOf(store, clusterId) &&
-    canTransact(store) &&
+    isFoundingMemberOf(member, clusterId) &&
+    canTransact(store, member) &&
     user.active &&
     user.storeId === store.id &&
     user.role === UserRole.PRINCIPAL

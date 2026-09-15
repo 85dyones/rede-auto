@@ -40,6 +40,7 @@ import { formatDuration } from '../shared/clock.ts';
 import type { DealId, LockId, StoreId, UserId } from '../shared/ids.ts';
 import type { Money } from '../shared/money.ts';
 import { type NetworkUser, type Store, canTransact } from '../network/store.ts';
+import type { Member } from '../network/member.ts';
 import {
   type Vehicle,
   CommercialStatus,
@@ -230,6 +231,8 @@ export type OpenLockCommand = {
   readonly vehicle: Vehicle;
   readonly holderStore: Store;
   readonly holderUser: NetworkUser;
+  /** A empresa do patio: inadimplencia dela tambem impede travar. */
+  readonly holderMember: Member;
   readonly customerReference?: string | undefined;
   readonly now: Instant;
   readonly policy?: LockPolicy;
@@ -237,14 +240,20 @@ export type OpenLockCommand = {
 
 export function openLock(command: OpenLockCommand): Transition<VehicleWithLock> {
   const policy = command.policy ?? DEFAULT_LOCK_POLICY;
-  const { vehicle, holderStore, holderUser, now } = command;
+  const { vehicle, holderStore, holderMember, holderUser, now } = command;
 
-  if (!canTransact(holderStore)) {
+  if (!canTransact(holderStore, holderMember)) {
     return err(
-      forbiddenError('STORE_NOT_ACTIVE', 'Loja suspensa ou fora da rede nao abre trava comercial.', {
-        storeId: holderStore.id,
-        status: holderStore.status,
-      }),
+      forbiddenError(
+        'STORE_NOT_ACTIVE',
+        'Loja suspensa, empresa inadimplente ou fora da rede nao abre trava comercial.',
+        {
+          storeId: holderStore.id,
+          storeStatus: holderStore.status,
+          memberId: holderMember.id,
+          memberStatus: holderMember.status,
+        },
+      ),
     );
   }
   if (holderUser.storeId !== holderStore.id || !holderUser.active) {

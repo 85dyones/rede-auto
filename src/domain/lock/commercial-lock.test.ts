@@ -25,6 +25,7 @@ import {
   type Vehicle,
 } from '../vehicle/vehicle.ts';
 import { StoreStatus } from '../network/store.ts';
+import { MemberStatus } from '../network/member.ts';
 import { HOUR, DAY } from '../shared/clock.ts';
 import { fromReais } from '../shared/money.ts';
 import { asDealId, asLockId, asStoreId } from '../shared/ids.ts';
@@ -59,6 +60,7 @@ function lockedByB(vehicle: Vehicle, now = T0): VehicleWithLock {
       lockId: asLockId('lck_0001'),
       vehicle,
       holderStore: lojaB,
+      holderMember: network.memberOf(lojaB),
       holderUser: vendedorB,
       customerReference: 'ATD-4471',
       now,
@@ -94,6 +96,7 @@ describe('abertura da trava', () => {
       lockId: asLockId('lck_0002'),
       vehicle,
       holderStore: lojaC,
+      holderMember: network.memberOf(lojaC),
       holderUser: vendedorC,
       now: T0 + HOUR,
     });
@@ -107,6 +110,7 @@ describe('abertura da trava', () => {
       lockId: asLockId('lck_0003'),
       vehicle,
       holderStore: lojaA,
+      holderMember: network.memberOf(lojaA),
       holderUser: gerenteA,
       now: T0 + HOUR,
     });
@@ -120,6 +124,7 @@ describe('abertura da trava', () => {
         lockId: asLockId('lck_own'),
         vehicle: availableVehicle(),
         holderStore: lojaA,
+      holderMember: network.memberOf(lojaA),
         holderUser: gerenteA,
         now: T0,
       }),
@@ -137,6 +142,7 @@ describe('abertura da trava', () => {
       lockId: asLockId('lck_x'),
       vehicle: semLaudo,
       holderStore: lojaB,
+      holderMember: network.memberOf(lojaB),
       holderUser: vendedorB,
       now: T0,
     });
@@ -152,6 +158,7 @@ describe('abertura da trava', () => {
       lockId: asLockId('lck_x'),
       vehicle: laudoVencido,
       holderStore: lojaB,
+      holderMember: network.memberOf(lojaB),
       holderUser: vendedorB,
       now: T0,
     });
@@ -159,11 +166,43 @@ describe('abertura da trava', () => {
     assert.equal(result.ok === false && result.error.code, 'INSPECTION_NOT_VALID');
   });
 
-  test('loja suspensa nao abre trava', () => {
+  test('patio suspenso por quebra de protocolo nao abre trava', () => {
     const result = openLock({
       lockId: asLockId('lck_x'),
       vehicle: availableVehicle(),
       holderStore: { ...lojaB, status: StoreStatus.SUSPENDED },
+      holderMember: network.memberOf(lojaB),
+      holderUser: vendedorB,
+      now: T0,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'STORE_NOT_ACTIVE');
+  });
+
+  test('empresa inadimplente nao abre trava, mesmo com o patio aberto', () => {
+    // Sao dois eixos, e os dois barram: o patio pode estar impecavel e a
+    // empresa dele estar suspensa por 30 dias de atraso. Se `canTransact`
+    // olhasse so para a loja, a filial seguiria operando pela empresa devedora.
+    const result = openLock({
+      lockId: asLockId('lck_x'),
+      vehicle: availableVehicle(),
+      holderStore: lojaB,
+      holderMember: { ...network.memberOf(lojaB), status: MemberStatus.SUSPENDED },
+      holderUser: vendedorB,
+      now: T0,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'STORE_NOT_ACTIVE');
+  });
+
+  test('patio de outra empresa nao trava em nome desta', () => {
+    // `canTransact` exige que a loja pertenca ao membro apresentado. Sem isso,
+    // bastaria passar uma empresa em dia qualquer para contornar a suspensao.
+    const result = openLock({
+      lockId: asLockId('lck_x'),
+      vehicle: availableVehicle(),
+      holderStore: lojaB,
+      holderMember: network.memberOf(lojaC),
       holderUser: vendedorB,
       now: T0,
     });
@@ -217,6 +256,7 @@ describe('expiracao por decurso de prazo', () => {
       lockId: asLockId('lck_re'),
       vehicle: expired.vehicle,
       holderStore: lojaB,
+      holderMember: network.memberOf(lojaB),
       holderUser: vendedorB,
       now: T0 + 4 * HOUR + 60_000,
     });
@@ -226,6 +266,7 @@ describe('expiracao por decurso de prazo', () => {
       lockId: asLockId('lck_re2'),
       vehicle: expired.vehicle,
       holderStore: lojaC,
+      holderMember: network.memberOf(lojaC),
       holderUser: vendedorC,
       now: T0 + 4 * HOUR + 60_000,
     });
