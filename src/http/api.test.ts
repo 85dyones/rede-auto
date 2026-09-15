@@ -993,3 +993,111 @@ describe('sincronizacao de feed', () => {
     assert.equal(response.body.erro.codigo, 'XML_DOCTYPE_REJECTED');
   });
 });
+
+/**
+ * A dona recebe propostas com carro na troca. Declarar a postura no cadastro
+ * move a descoberta para antes do trabalho — hoje a parceira monta a
+ * negociacao inteira e so descobre no aceite, com o cliente na mesa.
+ */
+describe('postura de troca', () => {
+  // `ficha` usa chaves em ingles no contrato atual, diferente do resto do corpo.
+  const ficha = {
+    brand: 'Hyundai', model: 'HB20', version: '1.0 Comfort',
+    manufactureYear: 2022, modelYear: 2023, mileageKm: 31_200,
+    color: 'Branco', fuel: 'FLEX', transmission: 'MANUAL', doors: 4,
+  };
+
+  const cadastro = (placa: string, chassi: string, extra: Record<string, unknown>) => ({
+    placa, chassi, ficha,
+    precoPublico: '72.900,00',
+    precoLiquidoRepasse: '66.000,00',
+    laudoCautelar: {
+      situacao: 'APPROVED', numero: 'LC-TROCA', empresa: 'Cautelar Brasil',
+      emitidoEm: '2026-08-01T12:00:00.000Z', validoAte: '2027-08-01T12:00:00.000Z',
+    },
+    ...extra,
+  });
+
+  test('o cadastro exige a decisao — nao ha padrao silencioso', async () => {
+    const response = await api<{ erro: { codigo: string } }>('POST', '/api/v1/veiculos', {
+      key: PRIME,
+      body: cadastro('JKL1M23', '9BWZZZ377VT900001', {}),
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.erro.codigo, 'FIELD_REQUIRED_BOOLEAN');
+  });
+
+  test('a postura declarada sai no catalogo, para quem le antes de propor', async () => {
+    const criado = await api<{ troca: { aceitaCarroNaTroca: boolean; observacao: string | null } }>(
+      'POST', '/api/v1/veiculos',
+      {
+        key: PRIME,
+        body: cadastro('JKL2M24', '9BWZZZ377VT900002', {
+          aceitaCarroNaTroca: false,
+          observacaoDaTroca: 'Preciso do dinheiro para quitar o floor plan.',
+        }),
+      },
+    );
+
+    assert.equal(criado.status, 201);
+    assert.equal(criado.body.troca.aceitaCarroNaTroca, false);
+    assert.equal(criado.body.troca.observacao, 'Preciso do dinheiro para quitar o floor plan.');
+  });
+
+  test('a dona muda de ideia; terceiro nao mexe', async () => {
+    const criado = await api<{ id: string }>('POST', '/api/v1/veiculos', {
+      key: PRIME,
+      body: cadastro('JKL3M25', '9BWZZZ377VT900003', { aceitaCarroNaTroca: false }),
+    });
+    const id = criado.body.id;
+
+    const alheio = await api('PATCH', `/api/v1/veiculos/${id}/troca`, {
+      key: VELOZ,
+      body: { aceitaCarroNaTroca: true },
+    });
+    assert.equal(alheio.status, 403, 'so a loja proprietaria decide');
+
+    const propria = await api<{ troca: { aceitaCarroNaTroca: boolean } }>(
+      'PATCH', `/api/v1/veiculos/${id}/troca`,
+      { key: PRIME, body: { aceitaCarroNaTroca: true } },
+    );
+    assert.equal(propria.status, 200);
+    assert.equal(propria.body.troca.aceitaCarroNaTroca, true);
+  });
+
+  test('a negociacao com transbordo e recusada na abertura, nao no aceite', async () => {
+    const criado = await api<{ id: string }>('POST', '/api/v1/veiculos', {
+      key: PRIME,
+      body: cadastro('JKL4M26', '9BWZZZ377VT900004', { aceitaCarroNaTroca: false }),
+    });
+    const id = criado.body.id;
+
+    await api('POST', `/api/v1/veiculos/${id}/trava`, {
+      key: VELOZ_VENDEDOR,
+      body: { referenciaAtendimento: 'ATD-TROCA' },
+    });
+
+    const negociacao = await api<{ erro: { codigo: string } }>(
+      'POST', `/api/v1/veiculos/${id}/negociacao`,
+      {
+        key: VELOZ_VENDEDOR,
+        body: {
+          precoAoConsumidor: '74.900,00',
+          troca: {
+            destino: 'OWNER_STORE',
+            valorDadoAoCliente: '20.000,00',
+            avaliacao: '19.000,00',
+            veiculo: {
+              placa: 'ZZZ9Z99', marca: 'Fiat', modelo: 'Mobi', versao: '1.0 Like',
+              anoModelo: 2019, km: 78_000,
+            },
+          },
+        },
+      },
+    );
+
+    assert.equal(negociacao.status, 422);
+    assert.equal(negociacao.body.erro.codigo, 'TRADE_IN_NOT_ACCEPTED');
+  });
+});

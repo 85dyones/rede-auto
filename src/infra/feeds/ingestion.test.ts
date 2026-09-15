@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 import { ChangeKind, MissingAction, ingestFeed, type IngestionContext, type IngestionReport } from './ingestion.ts';
 import { detectMapper, mapperFor } from './mappers/index.ts';
 import { parseXml } from './xml.ts';
-import { CommercialStatus, FuelType, TransmissionType, type Vehicle } from '../../domain/vehicle/vehicle.ts';
+import {
+  CommercialStatus,
+  FuelType,
+  TradeInStance,
+  TransmissionType,
+  type Vehicle,
+} from '../../domain/vehicle/vehicle.ts';
 import { asIngestionRunId, asLockId, asVehicleId, type StoreId } from '../../domain/shared/ids.ts';
 import { fromReais } from '../../domain/shared/money.ts';
 import { DAY } from '../../domain/shared/clock.ts';
@@ -29,6 +35,7 @@ function context(overrides: Partial<IngestionContext> = {}): IngestionContext {
     runId: asIngestionRunId('ing_0001'),
     clusterId: TEST_CLUSTER_ID,
     storeId: lojaA.id,
+    tradeInStance: TradeInStance.CONSIDERS,
     now: T0,
     existing: [],
     chassisOwners: new Map<string, StoreId>(),

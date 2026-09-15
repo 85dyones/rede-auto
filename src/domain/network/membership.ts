@@ -29,6 +29,7 @@ import { type DomainEvent, domainEvent } from '../shared/events.ts';
 import { type Transition, transitioned } from '../shared/transition.ts';
 import type { Instant } from '../shared/clock.ts';
 import type { ClusterId, ApplicationId, StoreId, UserId } from '../shared/ids.ts';
+import { TradeInStance } from '../vehicle/vehicle.ts';
 import {
   type NetworkUser,
   type Store,
@@ -360,6 +361,7 @@ export function admitApprovedStore(
     kind: 'MEMBER',
     status: 'ACTIVE',
     joinedAt: now,
+    tradeInDefault: TradeInStance.CONSIDERS,
     sponsorStoreId: application.sponsorStoreId,
   };
 

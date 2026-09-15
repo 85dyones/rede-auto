@@ -3,7 +3,12 @@
  */
 
 import { asLockId, asVehicleId } from '../../domain/shared/ids.ts';
-import { CommercialStatus, parseVehicleSpecs, InspectionStatus } from '../../domain/vehicle/vehicle.ts';
+import {
+  CommercialStatus,
+  parseVehicleSpecs,
+  InspectionStatus,
+  TradeInStance,
+} from '../../domain/vehicle/vehicle.ts';
 import { EvidenceType, type Evidence } from '../../domain/lock/evidence.ts';
 import { toInstant } from '../../domain/shared/clock.ts';
 import type { AppContext } from '../../application/context.ts';
@@ -17,6 +22,7 @@ import {
   relistInNetwork,
   releaseCommercialLock,
   searchCatalog,
+  setTradeInPolicy,
   updateVehiclePricing,
   withdrawFromNetwork,
 } from '../../application/inventory-service.ts';
@@ -25,6 +31,7 @@ import { errorResponse, json } from '../http-types.ts';
 import { lockDto, vehicleViewDto } from '../serialize.ts';
 import {
   asObject,
+  boolean,
   money,
   oneOf,
   optionalMoney,
@@ -66,6 +73,36 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
       total: page.total,
       veiculos: page.items.map((loaded) => vehicleViewDto(buildVehicleView(loaded, actor.value.store.id, at), at)),
     });
+  });
+
+  /**
+   * A dona muda de ideia sobre receber carro na troca. Diferente de `/precos`,
+   * vale na hora mesmo com trava ativa: nao move numero nenhum da negociacao em
+   * curso, so evita que a proxima parceira monte uma proposta a toa.
+   */
+  router.patch('/api/v1/veiculos/:id/troca', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const aceita = boolean(body.value, 'aceitaCarroNaTroca');
+    if (!aceita.ok) return errorResponse(aceita.error, request.requestId);
+
+    const result = await setTradeInPolicy(
+      context,
+      actor.value,
+      asVehicleId(request.params['id'] as string),
+      aceita.value ? TradeInStance.CONSIDERS : TradeInStance.CASH_ONLY,
+      optionalText(body.value, 'observacaoDaTroca') ?? null,
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    const loaded = await loadVehicle(context, actor.value, result.value.id);
+    if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
+    const at = context.clock.now();
+    return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
   });
 
   router.get('/api/v1/veiculos/meus', async (request) => {
@@ -128,6 +165,12 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const netPrice = money(body.value, 'precoLiquidoRepasse');
     if (!netPrice.ok) return errorResponse(netPrice.error, request.requestId);
 
+    // Obrigatorio de proposito: quem cadastra decide agora se aceita carro na
+    // troca. Sem isso a parceira descobre no aceite, com o cliente na mesa.
+    const aceitaTroca = boolean(body.value, 'aceitaCarroNaTroca');
+    if (!aceitaTroca.ok) return errorResponse(aceitaTroca.error, request.requestId);
+    const observacaoTroca = optionalText(body.value, 'observacaoDaTroca');
+
     const inspection = parseInspectionBody(body.value['laudoCautelar']);
 
     const result = await registerVehicle(context, actor.value, {
@@ -137,6 +180,8 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
       ...(inspection === undefined ? {} : { inspection }),
       publicPrice: publicPrice.value,
       netPrice: netPrice.value,
+      tradeInStance: aceitaTroca.value ? TradeInStance.CONSIDERS : TradeInStance.CASH_ONLY,
+      ...(observacaoTroca === undefined ? {} : { tradeInNote: observacaoTroca }),
     });
     if (!result.ok) return errorResponse(result.error, request.requestId);
 

@@ -20,6 +20,7 @@ import {
 import { type Money, fromReais, format } from '../shared/money.ts';
 import { HOUR } from '../shared/clock.ts';
 import { asDealId, asLockId, asSettlementId, asVehicleId } from '../shared/ids.ts';
+import { TradeInStance } from '../vehicle/vehicle.ts';
 import { unwrap } from '../shared/result.ts';
 import { buildFoundingNetwork } from '../../testing/builders.ts';
 
@@ -57,6 +58,19 @@ function trocaAbsorvida(overrides: Partial<TradeIn> = {}): TradeIn {
   };
 }
 
+/** Postura padrao dos testes: a dona avalia troca, como antes deste campo existir. */
+const ACEITA_TROCA = {
+  stance: TradeInStance.CONSIDERS,
+  note: null,
+  updatedAt: 0,
+} as const;
+
+const SO_DINHEIRO = {
+  stance: TradeInStance.CASH_ONLY,
+  note: 'Preciso do dinheiro para quitar o floor plan.',
+  updatedAt: 0,
+} as const;
+
 function novaNegociacao(overrides: Partial<Parameters<typeof openDeal>[0]> = {}): Deal {
   return unwrap(
     openDeal({
@@ -68,6 +82,7 @@ function novaNegociacao(overrides: Partial<Parameters<typeof openDeal>[0]> = {})
       createdByUserId: vendedorB.id,
       netPriceSnapshot: NET,
       retailPriceToConsumer: RETAIL,
+      tradeInPolicy: ACEITA_TROCA,
       now: T0,
       ...overrides,
     }),
@@ -105,6 +120,7 @@ describe('modelo financeiro do repasse', () => {
         createdByUserId: vendedorB.id,
         netPriceSnapshot: NET,
         retailPriceToConsumer: fromReais(80_000),
+        tradeInPolicy: ACEITA_TROCA,
         now: T0,
       }),
     );
@@ -121,7 +137,8 @@ describe('modelo financeiro do repasse', () => {
       createdByUserId: gerenteA.id,
       netPriceSnapshot: NET,
       retailPriceToConsumer: RETAIL,
-      now: T0,
+      tradeInPolicy: ACEITA_TROCA,
+        now: T0,
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'OWNER_IS_SELLER');
@@ -157,10 +174,80 @@ describe('cenario padrao: a Loja B absorve o carro de troca', () => {
       netPriceSnapshot: NET,
       retailPriceToConsumer: RETAIL,
       tradeIn: trocaAbsorvida({ allowanceToConsumer: fromReais(99_000) }),
-      now: T0,
+      tradeInPolicy: ACEITA_TROCA,
+        now: T0,
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'TRADE_IN_ALLOWANCE_ABOVE_RETAIL');
+  });
+});
+
+describe('postura de troca declarada pela dona', () => {
+  const transbordo = trocaAbsorvida({ destination: TradeInDestination.OWNER_STORE });
+
+  test('quem so trabalha com dinheiro recusa o transbordo na abertura, nao no aceite', () => {
+    // O ponto inteiro do campo: a Loja B descobre ANTES de montar a proposta,
+    // nao depois — com o cliente na mesa esperando resposta.
+    const result = openDeal({
+      dealId: asDealId('dea_recusa'),
+      vehicleId: asVehicleId('veh_0001'),
+      lockId: asLockId('lck_0001'),
+      ownerStoreId: lojaA.id,
+      sellingStoreId: lojaB.id,
+      createdByUserId: vendedorB.id,
+      netPriceSnapshot: NET,
+      retailPriceToConsumer: RETAIL,
+      tradeIn: transbordo,
+      tradeInPolicy: SO_DINHEIRO,
+      now: T0,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'TRADE_IN_NOT_ACCEPTED');
+  });
+
+  test('a recusa nao alcanca a troca que fica com a vendedora', () => {
+    // A dona so opina sobre metal que ELA receberia. Se o carro de troca fica no
+    // patio da Loja B, a dona recebe o liquido em dinheiro de qualquer forma —
+    // recusar ali seria a plataforma se metendo na venda dos outros.
+    const result = openDeal({
+      dealId: asDealId('dea_estoque'),
+      vehicleId: asVehicleId('veh_0001'),
+      lockId: asLockId('lck_0001'),
+      ownerStoreId: lojaA.id,
+      sellingStoreId: lojaB.id,
+      createdByUserId: vendedorB.id,
+      netPriceSnapshot: NET,
+      retailPriceToConsumer: RETAIL,
+      tradeIn: trocaAbsorvida({ destination: TradeInDestination.SELLER_STOCK }),
+      tradeInPolicy: SO_DINHEIRO,
+      now: T0,
+    });
+
+    assert.equal(result.ok, true, 'a troca que nao chega na dona nao depende da postura dela');
+  });
+
+  test('negociacao sem troca nenhuma passa por quem so trabalha com dinheiro', () => {
+    const result = openDeal({
+      dealId: asDealId('dea_limpa'),
+      vehicleId: asVehicleId('veh_0001'),
+      lockId: asLockId('lck_0001'),
+      ownerStoreId: lojaA.id,
+      sellingStoreId: lojaB.id,
+      createdByUserId: vendedorB.id,
+      netPriceSnapshot: NET,
+      retailPriceToConsumer: RETAIL,
+      tradeInPolicy: SO_DINHEIRO,
+      now: T0,
+    });
+
+    assert.equal(result.ok, true);
+  });
+
+  test('quem aceita avaliar continua decidindo caso a caso', () => {
+    // CONSIDERS nao e promessa de aceite: a negociacao ainda para esperando.
+    const deal = novaNegociacao({ tradeIn: transbordo, tradeInPolicy: ACEITA_TROCA });
+    assert.equal(deal.status, DealStatus.AWAITING_TRADE_IN_ACCEPTANCE);
   });
 });
 
@@ -543,6 +630,7 @@ describe('o preco ao consumidor e da vendedora, nao da rede', () => {
         sellingStoreId: lojaB.id,
         createdByUserId: vendedorB.id,
         netPriceSnapshot: NET,
+        tradeInPolicy: ACEITA_TROCA,
         now: T0,
       }),
     ).state;
@@ -580,6 +668,7 @@ describe('o preco ao consumidor e da vendedora, nao da rede', () => {
         createdByUserId: vendedorB.id,
         netPriceSnapshot: NET,
         retailPriceToConsumer: fromReais(80_000),
+        tradeInPolicy: ACEITA_TROCA,
         now: T0,
       }),
     );

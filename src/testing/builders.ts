@@ -76,6 +76,7 @@ export function buildStore(overrides: Partial<Store> = {}): Store {
     profile: overrides.profile ?? buildStoreProfile(),
     kind: overrides.kind ?? StoreKind.FOUNDER,
     status: overrides.status ?? StoreStatus.ACTIVE,
+    tradeInDefault: overrides.tradeInDefault ?? TradeInStance.CONSIDERS,
     joinedAt: overrides.joinedAt ?? 0,
     sponsorStoreId: overrides.sponsorStoreId ?? null,
   };
@@ -133,6 +134,7 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
     founders.push({
       id: storeId,
       clusterId: TEST_CLUSTER_ID,
+      tradeInDefault: TradeInStance.CONSIDERS,
       profile: buildStoreProfile({
         tradeName,
         legalName: `${tradeName} Comercio de Veiculos LTDA`,
@@ -190,6 +192,7 @@ import {
   InspectionStatus,
   NO_FEED_SOURCE,
   PhysicalState,
+  TradeInStance,
   TransmissionType,
   VehicleAngle,
   type NeutralPhoto,
@@ -259,6 +262,11 @@ export function buildVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     chassis: overrides.chassis ?? `9BWZZZ377VT${String(100000 + vehicleCounter).slice(0, 6)}`,
     specs: overrides.specs ?? buildSpecs(),
     inspection: overrides.inspection ?? buildApprovedInspection(now),
+    tradeInPolicy: overrides.tradeInPolicy ?? {
+      stance: TradeInStance.CONSIDERS,
+      note: null,
+      updatedAt: now,
+    },
     neutralPhotos: overrides.neutralPhotos ?? buildNeutralPhotos(now),
     pricing: overrides.pricing ?? {
       publicPrice: fromReais(92_900),

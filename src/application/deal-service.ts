@@ -87,6 +87,7 @@ export async function startDeal(
     netPriceSnapshot: lock.netPriceSnapshot,
     retailPriceToConsumer: input.retailPriceToConsumer,
     tradeIn: input.tradeIn ?? null,
+    tradeInPolicy: loaded.value.vehicle.tradeInPolicy,
     now: context.clock.now(),
   });
   if (!transition.ok) return transition;

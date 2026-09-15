@@ -42,6 +42,15 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Estoque avançado | `isOnExtendedCustody` | veículo comercialmente disponível a toda a rede, mas fisicamente no pátio de outra loja. |
 | Oportunidade de balcão | — | o que o carro vira para a loja custodiante quando a trava expira: ele está na vitrine dela e livre para travar de novo. |
 
+## Troca
+
+| Termo | No código | O que é |
+|---|---|---|
+| Postura de troca | `TradeInPolicy` | declarada pela dona no cadastro: ela avalia carro na troca neste veículo, ou só dinheiro. |
+| Aceita avaliar | `CONSIDERS` | a dona olha o carro. **Não é promessa de aceite** — o transbordo segue caso a caso. |
+| Só dinheiro | `CASH_ONLY` | o transbordo é recusado na abertura da negociação, antes do trabalho. |
+| Padrão da loja | `Store.tradeInDefault` | o que o veículo que entra pelo feed herda; o XML do integrador não tem esse campo. |
+
 ## Trade-in
 
 | Termo | No código | O que é |

@@ -192,6 +192,48 @@ export type Pricing = {
 };
 
 // ---------------------------------------------------------------------------
+// Troca na operacao: o que a dona aceita receber em vez de dinheiro
+// ---------------------------------------------------------------------------
+
+export const TradeInStance = {
+  /**
+   * A dona avalia um carro na troca. NAO e promessa de aceite — o transbordo
+   * segue passando pelo julgamento dela, carro a carro.
+   */
+  CONSIDERS: 'CONSIDERS',
+  /** So dinheiro. A parceira nem monta a proposta com troca. */
+  CASH_ONLY: 'CASH_ONLY',
+} as const;
+export type TradeInStance = (typeof TradeInStance)[keyof typeof TradeInStance];
+
+/**
+ * Postura da loja dona quanto a receber um carro na troca (transbordo).
+ *
+ * Existe porque o custo de descobrir tarde e alto e assimetrico: hoje a
+ * parceira monta a negociacao inteira, propoe o transbordo e so entao descobre
+ * que a dona so trabalha com dinheiro — e descobre no pior instante possivel,
+ * com o cliente na mesa. A postura declarada move essa informacao para antes
+ * do trabalho, que e a razao de a plataforma existir.
+ *
+ * O padrao e `CONSIDERS` porque e o comportamento que ja existia: propor e
+ * esperar avaliacao. O sinal que economiza tempo e o `CASH_ONLY`.
+ */
+export type TradeInPolicy = {
+  readonly stance: TradeInStance;
+  /**
+   * Restricao que o enum nao captura: "nada acima de 100 mil km", "so hatch".
+   * Curta e consultiva — nao e validada e nao bloqueia nada. Existe para a
+   * conversa nao voltar para o WhatsApp por causa de um detalhe.
+   */
+  readonly note: string | null;
+  readonly updatedAt: Instant;
+};
+
+export function acceptsTradeIn(vehicle: Vehicle): boolean {
+  return vehicle.tradeInPolicy.stance === TradeInStance.CONSIDERS;
+}
+
+// ---------------------------------------------------------------------------
 // Material de divulgacao
 // ---------------------------------------------------------------------------
 
@@ -269,6 +311,8 @@ export type Vehicle = {
    */
   readonly neutralPhotos: readonly NeutralPhoto[];
   readonly pricing: Pricing;
+  /** Declarada pela dona: ela avalia carro na troca neste veiculo, ou so dinheiro. */
+  readonly tradeInPolicy: TradeInPolicy;
   readonly commercialStatus: CommercialStatus;
   readonly activeLockId: LockId | null;
   readonly physical: PhysicalCustody;
@@ -299,6 +343,12 @@ export type CreateVehicleInput = {
   readonly inspection?: InspectionReport;
   readonly publicPrice: Money;
   readonly netPrice: Money;
+  /**
+   * Obrigatoria: quem cadastra decide na hora. Deixar implicito devolveria o
+   * problema que este campo existe para resolver.
+   */
+  readonly tradeInStance: TradeInStance;
+  readonly tradeInNote?: string | null;
   readonly source?: FeedSource;
   readonly now: Instant;
 };
@@ -322,6 +372,11 @@ export function createVehicle(input: CreateVehicleInput): Result<Vehicle, Domain
     chassis: identity.value.chassis,
     specs: input.specs,
     inspection,
+    tradeInPolicy: {
+      stance: input.tradeInStance,
+      note: input.tradeInNote ?? null,
+      updatedAt: input.now,
+    },
     neutralPhotos: [],
     pricing: { publicPrice: input.publicPrice, netPrice: input.netPrice, updatedAt: input.now },
     // Nasce em DRAFT; so vai a rede quando o laudo aprovado for confirmado.
@@ -505,6 +560,68 @@ export function updatePricing(command: UpdatePricingCommand): Transition<Vehicle
 }
 
 /** Aplica o preco represado quando a trava termina. Idempotente. */
+export type UpdateTradeInPolicyCommand = {
+  readonly vehicle: Vehicle;
+  readonly actorStoreId: StoreId;
+  readonly stance: TradeInStance;
+  readonly note?: string | null;
+  readonly now: Instant;
+};
+
+/**
+ * Muda a postura de troca. Vale **na hora**, mesmo com trava ativa — e o
+ * oposto do preco liquido, que fica represado.
+ *
+ * A diferenca nao e arbitraria. O preco represa porque a Loja B fechou um
+ * numero com o cliente e mover a trave quebraria a negociacao em curso. A
+ * postura de troca nao move numero nenhum: ela so diz se vale a pena montar
+ * uma proposta com carro na troca. Segurar essa informacao ate a trava cair
+ * produziria exatamente o trabalho perdido que o campo existe para evitar.
+ *
+ * Uma negociacao ja aberta com transbordo nao e afetada: quem ja propos segue
+ * esperando o aceite, porque a proposta foi feita sob a regra anterior.
+ */
+export function updateTradeInPolicy(command: UpdateTradeInPolicyCommand): Transition<Vehicle> {
+  const { vehicle, actorStoreId, stance, now } = command;
+
+  if (actorStoreId !== vehicle.ownerStoreId) {
+    return err(
+      forbiddenError(
+        'NOT_VEHICLE_OWNER',
+        'Somente a loja proprietaria decide se aceita carro na troca.',
+        { vehicleId: vehicle.id, ownerStoreId: vehicle.ownerStoreId },
+      ),
+    );
+  }
+  if (vehicle.commercialStatus === CommercialStatus.SOLD) {
+    return err(
+      conflictError('VEHICLE_SOLD', 'Veiculo ja vendido: a postura de troca nao muda mais.', {
+        vehicleId: vehicle.id,
+      }),
+    );
+  }
+
+  const note = command.note === undefined ? vehicle.tradeInPolicy.note : command.note;
+  const unchanged =
+    stance === vehicle.tradeInPolicy.stance && note === vehicle.tradeInPolicy.note;
+  if (unchanged) return transitioned(vehicle, []);
+
+  const updated: Vehicle = {
+    ...vehicle,
+    tradeInPolicy: { stance, note, updatedAt: now },
+    updatedAt: now,
+  };
+
+  return transitioned(updated, [
+    domainEvent('vehicle.trade_in_policy_changed', vehicle.id, now, {
+      clusterId: vehicle.clusterId,
+      ownerStoreId: vehicle.ownerStoreId,
+      from: vehicle.tradeInPolicy.stance,
+      to: stance,
+    }),
+  ]);
+}
+
 export function applyPendingNetPrice(vehicle: Vehicle, now: Instant): Transition<Vehicle> {
   if (vehicle.pendingNetPrice === null) return unchanged(vehicle);
 

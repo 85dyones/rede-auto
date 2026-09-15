@@ -184,6 +184,8 @@ O seu estoque, e os carros **de outras lojas** parados no seu pátio.
   },
   "precoPublico": { "centavos": 9290000 },
   "precoLiquidoRepasse": { "centavos": 8500000 },
+  "aceitaCarroNaTroca": false,
+  "observacaoDaTroca": "Preciso do dinheiro para quitar o floor plan.",
   "laudoCautelar": {
     "situacao": "APPROVED",
     "numero": "LC-2026-4471", "empresa": "Cautelar Brasil",
@@ -194,6 +196,30 @@ O seu estoque, e os carros **de outras lojas** parados no seu pátio.
 
 Sem laudo aprovado e vigente, o veículo nasce `DRAFT` e não circula na rede.
 Chassi já anunciado por outra loja → `409 DUPLICATE_VIN_IN_NETWORK`.
+
+`aceitaCarroNaTroca` é **obrigatório** — sem ele, `400 FIELD_REQUIRED_BOOLEAN`.
+Não existe padrão silencioso aqui de propósito: é a resposta que a parceira
+precisa ler **antes** de montar uma proposta com carro na troca. `false` bloqueia
+o transbordo na abertura da negociação (`422 TRADE_IN_NOT_ACCEPTED`), não no
+aceite — que é tarde demais, com o cliente na mesa.
+
+`observacaoDaTroca` é livre, curta e consultiva: não é validada e não bloqueia
+nada. Existe para a restrição que o booleano não captura ("nada acima de 100 mil
+km") não voltar a virar telefonema.
+
+> Atenção ao contrato atual: o objeto `ficha` usa chaves em **inglês**
+> (`brand`, `model`, `mileageKm`…), diferente do resto do corpo, que é pt-BR.
+
+### `PATCH /api/v1/veiculos/:id/troca`
+
+```jsonc
+{ "aceitaCarroNaTroca": true, "observacaoDaTroca": null }
+```
+
+Só a loja proprietária (`403 NOT_VEHICLE_OWNER`). Diferente de `/precos`, vale
+**na hora mesmo com trava ativa**: não move nenhum número da negociação em curso,
+apenas evita que a próxima parceira monte uma proposta à toa. Uma negociação já
+aberta com transbordo não é afetada — foi proposta sob a regra anterior.
 
 ### `PATCH /api/v1/veiculos/:id/precos`
 

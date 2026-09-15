@@ -37,6 +37,25 @@ export function optionalText(body: Record<string, unknown>, name: string): strin
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+/**
+ * Booleano obrigatorio. Existe para os campos em que "nao informou" nao pode
+ * virar um padrao silencioso — a postura de troca e o caso: deixar implicito
+ * devolveria o telefonema que o campo existe para eliminar.
+ */
+export function boolean(
+  body: Record<string, unknown>,
+  name: string,
+): Result<boolean, DomainError> {
+  const value = field(body, name);
+  if (typeof value === 'boolean') return ok(value);
+  return err(
+    validationError('FIELD_REQUIRED_BOOLEAN', `${name}: informe true ou false.`, {
+      field: name,
+      received: value === undefined ? null : typeof value,
+    }),
+  );
+}
+
 export function optionalBoolean(body: Record<string, unknown>, name: string): boolean | undefined {
   const value = body[name];
   return typeof value === 'boolean' ? value : undefined;

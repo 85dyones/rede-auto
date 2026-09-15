@@ -12,6 +12,7 @@ import { type DomainError, validationError } from '../shared/errors.ts';
 import type { Instant } from '../shared/clock.ts';
 import type { ClusterId, StoreId, UserId } from '../shared/ids.ts';
 import { parseCnpj, requireText, requireOneOf } from '../shared/validation.ts';
+import { TradeInStance } from '../vehicle/vehicle.ts';
 
 export const StoreKind = {
   /** Uma das 6 lojas constituintes. Tem direito a voto no credenciamento. */
@@ -66,6 +67,14 @@ export type Store = {
   readonly kind: StoreKind;
   readonly status: StoreStatus;
   readonly joinedAt: Instant;
+  /**
+   * Postura padrao de troca desta loja. O veiculo que entra pelo feed nasce com
+   * ela — sem isso, uma loja que so trabalha com dinheiro teria de marcar carro
+   * por carro a cada sincronizacao, e o campo nao seria usado.
+   *
+   * `CONSIDERS` na constituicao porque e o comportamento que ja existia.
+   */
+  readonly tradeInDefault: TradeInStance;
   /** Quem apadrinhou a candidatura. `null` para as fundadoras. */
   readonly sponsorStoreId: StoreId | null;
 };

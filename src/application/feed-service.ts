@@ -43,6 +43,7 @@ export async function syncStoreFeed(
     runId: asIngestionRunId(context.ids.next('ing')),
     clusterId: actor.store.clusterId,
     storeId: actor.store.id,
+    tradeInStance: actor.store.tradeInDefault,
     now: context.clock.now(),
     provider: input.provider,
     existing,

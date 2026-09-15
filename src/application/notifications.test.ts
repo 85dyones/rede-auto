@@ -8,7 +8,12 @@ import { loadConfig } from '../config.ts';
 import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
 import { fromReais } from '../domain/shared/money.ts';
-import { FuelType, InspectionStatus, TransmissionType } from '../domain/vehicle/vehicle.ts';
+import {
+  FuelType,
+  InspectionStatus,
+  TradeInStance,
+  TransmissionType,
+} from '../domain/vehicle/vehicle.ts';
 import { openCommercialLock, registerVehicle } from './inventory-service.ts';
 import { requestVehicleRecall } from './custody-service.ts';
 import { runSweep } from './scheduler.ts';
@@ -170,6 +175,7 @@ describe('entrega das notificacoes', () => {
         },
         publicPrice: fromReais(92_900),
         netPrice: fromReais(85_000),
+        tradeInStance: TradeInStance.CONSIDERS,
       }),
     );
 
@@ -206,6 +212,7 @@ describe('entrega das notificacoes', () => {
         },
         publicPrice: fromReais(92_900),
         netPrice: fromReais(85_000),
+        tradeInStance: TradeInStance.CONSIDERS,
       }),
     );
 

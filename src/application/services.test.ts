@@ -6,7 +6,7 @@ import { loadConfig } from '../config.ts';
 import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
 import { fromReais } from '../domain/shared/money.ts';
-import { FuelType, TransmissionType } from '../domain/vehicle/vehicle.ts';
+import { FuelType, TradeInStance, TransmissionType } from '../domain/vehicle/vehicle.ts';
 import { asClusterId, asStoreId, asUserId } from '../domain/shared/ids.ts';
 import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody.ts';
 import type { Actor } from './context.ts';
@@ -87,6 +87,7 @@ const cadastro = (plate: string, chassis: string) => ({
   specs: ficha,
   publicPrice: fromReais(92_900),
   netPrice: fromReais(85_000),
+  tradeInStance: TradeInStance.CONSIDERS,
 });
 
 describe('deduplicacao no cadastro manual', () => {
@@ -243,6 +244,7 @@ describe('fronteira entre pracas', () => {
       specs: ficha,
       publicPrice: fromReais(92_900),
       netPrice: fromReais(85_000),
+      tradeInStance: TradeInStance.CONSIDERS,
     });
     assert.ok(carro.ok);
 

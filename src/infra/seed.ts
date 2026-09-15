@@ -19,6 +19,7 @@ import {
   type Vehicle,
   FuelType,
   InspectionStatus,
+  TradeInStance,
   TransmissionType,
   VehicleAngle,
   createVehicle,
@@ -51,13 +52,15 @@ export type SeedResult = {
  */
 const PILOT_CLUSTER_SLUG = 'curitiba-rmc';
 
+// A Sul Car entra como CASH_ONLY de proposito: sem uma loja assim, o piloto
+// nunca exercita o caminho que este campo existe para cobrir.
 const FOUNDERS = [
-  { slug: 'prime', tradeName: 'Prime Motors', city: 'Curitiba', state: 'PR', cnpj: '11222333000181' },
-  { slug: 'veloz', tradeName: 'Veloz Seminovos', city: 'Sao Jose dos Pinhais', state: 'PR', cnpj: '04252011000110' },
-  { slug: 'central', tradeName: 'Garagem Central', city: 'Curitiba', state: 'PR', cnpj: '34028316000103' },
-  { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Colombo', state: 'PR', cnpj: '33000167000101' },
-  { slug: 'sul', tradeName: 'Sul Car', city: 'Araucaria', state: 'PR', cnpj: '60746948000112' },
-  { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Pinhais', state: 'PR', cnpj: '47960950000121' },
+  { slug: 'prime', tradeName: 'Prime Motors', city: 'Curitiba', state: 'PR', cnpj: '11222333000181', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'veloz', tradeName: 'Veloz Seminovos', city: 'Sao Jose dos Pinhais', state: 'PR', cnpj: '04252011000110', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'central', tradeName: 'Garagem Central', city: 'Curitiba', state: 'PR', cnpj: '34028316000103', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'norte', tradeName: 'Norte Automoveis', city: 'Colombo', state: 'PR', cnpj: '33000167000101', tradeInDefault: TradeInStance.CONSIDERS },
+  { slug: 'sul', tradeName: 'Sul Car', city: 'Araucaria', state: 'PR', cnpj: '60746948000112', tradeInDefault: TradeInStance.CASH_ONLY },
+  { slug: 'vialivre', tradeName: 'Via Livre Veiculos', city: 'Pinhais', state: 'PR', cnpj: '47960950000121', tradeInDefault: TradeInStance.CONSIDERS },
 ] as const;
 
 const DEMO_VEHICLES = [
@@ -199,6 +202,7 @@ export async function seedFoundingNetwork(
       kind: StoreKind.FOUNDER,
       status: StoreStatus.ACTIVE,
       joinedAt: now,
+      tradeInDefault: founder.tradeInDefault,
       sponsorStoreId: null,
     };
 
@@ -246,6 +250,7 @@ export async function seedFoundingNetwork(
       id: asVehicleId(`veh_demo_${index + 1}`),
       clusterId: cluster.id,
       ownerStoreId: owner.store.id,
+      tradeInStance: owner.store.tradeInDefault,
       plate: spec.plate,
       chassis: spec.chassis,
       specs: {

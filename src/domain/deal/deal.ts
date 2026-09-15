@@ -36,6 +36,7 @@ import {
 import { type DomainEvent, domainEvent } from '../shared/events.ts';
 import { type Transition, transitioned } from '../shared/transition.ts';
 import type { Instant } from '../shared/clock.ts';
+import { type TradeInPolicy, TradeInStance } from '../vehicle/vehicle.ts';
 import type { DealId, LockId, SettlementId, StoreId, UserId, VehicleId } from '../shared/ids.ts';
 import {
   type Money,
@@ -274,6 +275,12 @@ export type OpenDealCommand = {
   /** Opcional: a venda ao consumidor acontece fora da plataforma. */
   readonly retailPriceToConsumer?: Money | null;
   readonly tradeIn?: TradeIn | null;
+  /**
+   * Postura de troca declarada pela dona, lida do veiculo. Entra no comando em
+   * vez de o servico checar antes porque a regra e de negocio, nao de
+   * orquestracao — e aqui o compilador cobra de quem abrir uma negociacao.
+   */
+  readonly tradeInPolicy: TradeInPolicy;
   readonly now: Instant;
 };
 
@@ -299,7 +306,7 @@ export function openDeal(command: OpenDealCommand): Transition<Deal> {
 
   const tradeIn = command.tradeIn ?? null;
   if (tradeIn !== null) {
-    const check = validateTradeIn(tradeIn, retail, command.netPriceSnapshot);
+    const check = validateTradeIn(tradeIn, retail, command.netPriceSnapshot, command.tradeInPolicy);
     if (!check.ok) return check;
   }
 
@@ -370,9 +377,27 @@ function validateTradeIn(
   tradeIn: TradeIn,
   retailPrice: Money | null,
   netPrice: Money,
+  policy: TradeInPolicy,
 ): Result<true, DomainError> {
   if (isNegative(tradeIn.allowanceToConsumer) || isNegative(tradeIn.appraisedValue)) {
     return err(validationError('TRADE_IN_NEGATIVE_VALUE', 'Valores da troca nao podem ser negativos.'));
+  }
+
+  // A recusa so vale para o transbordo. Se o carro de troca fica no patio da
+  // vendedora (SELLER_STOCK), a dona nao recebe metal nenhum e nao tem o que
+  // opinar — recusar ali seria a plataforma se metendo na venda dos outros.
+  if (
+    tradeIn.destination === TradeInDestination.OWNER_STORE &&
+    policy.stance === TradeInStance.CASH_ONLY
+  ) {
+    return err(
+      ruleViolation(
+        'TRADE_IN_NOT_ACCEPTED',
+        'A loja proprietaria trabalha somente com dinheiro neste veiculo: o carro de troca ' +
+          'fica com voce e o liquido e pago integralmente.',
+        { stance: policy.stance, note: policy.note },
+      ),
+    );
   }
   if (retailPrice !== null && gt(tradeIn.allowanceToConsumer, retailPrice)) {
     return err(

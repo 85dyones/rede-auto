@@ -28,6 +28,7 @@ import type { Money } from '../domain/shared/money.ts';
 import { hasManagerPowers } from '../domain/network/store.ts';
 import {
   type InspectionReport,
+  type TradeInStance,
   type Vehicle,
   type VehicleSpecs,
   CommercialStatus,
@@ -35,6 +36,7 @@ import {
   registerInspection,
   relistVehicle,
   updatePricing,
+  updateTradeInPolicy,
   withdrawVehicle,
 } from '../domain/vehicle/vehicle.ts';
 import {
@@ -133,6 +135,9 @@ export type RegisterVehicleInput = {
   readonly inspection?: InspectionReport | undefined;
   readonly publicPrice: Money;
   readonly netPrice: Money;
+  /** Obrigatoria no cadastro manual; o padrao da loja so preenche o formulario. */
+  readonly tradeInStance: TradeInStance;
+  readonly tradeInNote?: string | null;
 };
 
 export async function registerVehicle(
@@ -152,6 +157,8 @@ export async function registerVehicle(
     ...(input.inspection === undefined ? {} : { inspection: input.inspection }),
     publicPrice: input.publicPrice,
     netPrice: input.netPrice,
+    tradeInStance: input.tradeInStance,
+    ...(input.tradeInNote === undefined ? {} : { tradeInNote: input.tradeInNote }),
     now: context.clock.now(),
   });
   if (!created.ok) return created;
@@ -476,6 +483,36 @@ export function buildVehicleView(
  * isso impossivel de escrever, nao apenas proibido.
  */
 export type CatalogQuery = Omit<VehicleQuery, 'clusterId'>;
+
+/**
+ * A dona muda a postura de troca. Vale na hora, inclusive com trava ativa —
+ * ver `updateTradeInPolicy` para por que isso difere do preco liquido.
+ */
+export async function setTradeInPolicy(
+  context: AppContext,
+  actor: Actor,
+  vehicleId: VehicleId,
+  stance: TradeInStance,
+  note?: string | null,
+): Promise<Result<Vehicle, DomainError>> {
+  if (!hasManagerPowers(actor.user)) return err(managerRequired('definir a postura de troca'));
+
+  const loaded = await loadVehicle(context, actor, vehicleId);
+  if (!loaded.ok) return loaded;
+
+  const transition = updateTradeInPolicy({
+    vehicle: loaded.value.vehicle,
+    actorStoreId: actor.store.id,
+    stance,
+    ...(note === undefined ? {} : { note }),
+    now: context.clock.now(),
+  });
+  if (!transition.ok) return transition;
+
+  await context.repos.vehicles.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+  return ok(transition.value.state);
+}
 
 export async function searchCatalog(
   context: AppContext,

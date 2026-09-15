@@ -98,6 +98,16 @@ export function vehicleDto(vehicle: Vehicle) {
       liquidoRepresado: vehicle.pendingNetPrice === null ? null : money(vehicle.pendingNetPrice),
       atualizadoEm: instant(vehicle.pricing.updatedAt),
     },
+    /**
+     * Visivel a toda a rede, e de proposito: e o dado que a parceira le ANTES de
+     * montar a proposta. Escondê-lo devolveria a descoberta para o aceite.
+     */
+    troca: {
+      aceitaCarroNaTroca: vehicle.tradeInPolicy.stance === 'CONSIDERS',
+      postura: vehicle.tradeInPolicy.stance,
+      observacao: vehicle.tradeInPolicy.note,
+      atualizadoEm: instant(vehicle.tradeInPolicy.updatedAt),
+    },
     comercial: {
       situacao: vehicle.commercialStatus,
       travaAtivaId: vehicle.activeLockId,

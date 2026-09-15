@@ -27,6 +27,7 @@ import type { Instant } from '../../domain/shared/clock.ts';
 import type { ClusterId, IngestionRunId, StoreId, VehicleId } from '../../domain/shared/ids.ts';
 import { equals as moneyEquals } from '../../domain/shared/money.ts';
 import {
+  type TradeInStance,
   type Vehicle,
   CommercialStatus,
   createVehicle,
@@ -89,6 +90,12 @@ export type IngestionContext = {
   readonly runId: IngestionRunId;
   readonly clusterId: ClusterId;
   readonly storeId: StoreId;
+  /**
+   * Postura de troca herdada da loja: o XML do integrador nao tem esse campo e
+   * nunca vai ter. Herdar e a unica forma de o feed produzir veiculos com a
+   * postura certa sem alguem marcar carro por carro.
+   */
+  readonly tradeInStance: TradeInStance;
   readonly now: Instant;
   /** Integrador declarado. Se ausente, o formato e detectado pelo conteudo. */
   readonly provider?: string | undefined;
@@ -233,6 +240,7 @@ function createFromRecord(
     id: context.nextVehicleId(),
     clusterId: context.clusterId,
     ownerStoreId: context.storeId,
+    tradeInStance: context.tradeInStance,
     plate: record.plate,
     chassis: record.chassis,
     specs: record.specs,
