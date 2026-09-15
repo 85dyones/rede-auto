@@ -96,6 +96,18 @@ export type CommercialLock = {
   readonly extensions: readonly LockExtension[];
   /** Referencia interna do atendimento na Loja B. Sem dado pessoal do cliente. */
   readonly customerReference: string | null;
+  /**
+   * Instante em que o relogio parou porque o carro entrou em transito para quem
+   * travou. `null` quando o relogio esta correndo.
+   *
+   * A trava e exclusividade para atender um cliente, e nao se atende cliente com
+   * o carro no guincho. Queimar as 4 horas esperando o transporte e pagar por um
+   * tempo que nao da para usar — e empurra a parceira a so travar depois que o
+   * carro chega, que e quando a corrida pelo carro ja aconteceu.
+   */
+  readonly suspendedAt: Instant | null;
+  /** Quanto tempo ja foi devolvido por transito. Existe para o teto poder cortar. */
+  readonly suspendedMs: number;
   readonly endedAt: Instant | null;
   readonly endReason: LockEndReason | null;
   readonly dealId: DealId | null;
@@ -113,7 +125,11 @@ export type VehicleWithLock = {
  */
 
 export function isActive(lock: CommercialLock, now: Instant): boolean {
-  return lock.status === LockStatus.ACTIVE && now < lock.expiresAt;
+  if (lock.status !== LockStatus.ACTIVE) return false;
+  // Com o relogio parado a trava nao vence: o prazo so volta a correr quando o
+  // carro chega. Sem isto o varredor expiraria a trava no meio da viagem.
+  if (lock.suspendedAt !== null) return true;
+  return now < lock.expiresAt;
 }
 
 export function remainingMs(lock: CommercialLock, now: Instant): number {
@@ -131,6 +147,78 @@ export function usesOfEvidence(lock: CommercialLock, type: string): number {
 /** Prazo maximo absoluto desta trava, contado da abertura. */
 export function hardDeadline(lock: CommercialLock, policy: LockPolicy): Instant {
   return lock.openedAt + policy.maxTotalMs;
+}
+
+/** O relogio esta parado porque o carro esta a caminho de quem travou. */
+export function isSuspended(lock: CommercialLock): boolean {
+  return lock.suspendedAt !== null;
+}
+
+/**
+ * Para o relogio: o carro entrou em transito rumo a quem detem a trava.
+ *
+ * So faz sentido quando o destino e o proprio detentor — carro indo para
+ * qualquer outro lugar nao atrapalha o atendimento dele.
+ */
+export function suspendForTransit(
+  lock: CommercialLock,
+  toStoreId: StoreId,
+  now: Instant,
+): Transition<CommercialLock> {
+  if (!isActive(lock, now)) return unchanged(lock);
+  if (isSuspended(lock)) return unchanged(lock);
+  if (toStoreId !== lock.holderStoreId) return unchanged(lock);
+
+  return transitioned({ ...lock, suspendedAt: now }, [
+    domainEvent('lock.suspended_for_transit', lock.vehicleId, now, {
+      lockId: lock.id,
+      holderStoreId: lock.holderStoreId,
+      expiresAt: lock.expiresAt,
+    }),
+  ]);
+}
+
+/**
+ * O carro chegou (ou a viagem morreu): o relogio volta a correr, e o prazo anda
+ * para frente pelo tempo que ficou parado.
+ *
+ * Dois tetos cortam, e os dois precisam existir. `maxTransitSuspensionMs`
+ * impede que um carro perdido no caminho segure a trava por dias; o teto
+ * absoluto (`maxTotalMs`, contado da ABERTURA) continua valendo por cima, entao
+ * suspender nunca vira um jeito de ultrapassar os 5 dias.
+ */
+export function resumeAfterTransit(
+  lock: CommercialLock,
+  now: Instant,
+  policy: LockPolicy = DEFAULT_LOCK_POLICY,
+): Transition<CommercialLock> {
+  const suspendedAt = lock.suspendedAt;
+  if (suspendedAt === null) return unchanged(lock);
+
+  const parado = Math.max(0, now - suspendedAt);
+  const devolvido = Math.min(parado, policy.maxTransitSuspensionMs);
+  const teto = hardDeadline(lock, policy);
+  const novoPrazo = Math.min(lock.expiresAt + devolvido, teto);
+
+  return transitioned(
+    {
+      ...lock,
+      expiresAt: novoPrazo,
+      suspendedAt: null,
+      suspendedMs: lock.suspendedMs + devolvido,
+    },
+    [
+      domainEvent('lock.resumed_after_transit', lock.vehicleId, now, {
+        lockId: lock.id,
+        holderStoreId: lock.holderStoreId,
+        suspendedMs: parado,
+        grantedMs: devolvido,
+        cappedByTransitLimit: parado > policy.maxTransitSuspensionMs,
+        cappedByHardDeadline: lock.expiresAt + devolvido > teto,
+        newExpiresAt: novoPrazo,
+      }),
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +311,8 @@ export function openLock(command: OpenLockCommand): Transition<VehicleWithLock> 
     netPriceSnapshot: vehicle.pricing.netPrice,
     extensions: [],
     customerReference: reference !== undefined && reference.length > 0 ? reference : null,
+    suspendedAt: null,
+    suspendedMs: 0,
     endedAt: null,
     endReason: null,
     dealId: null,

@@ -320,6 +320,33 @@ quem entrega é quem atendeu o cliente.
 Quem assina a saída é a loja que **está** com o carro. O veículo vai para
 `IN_TRANSIT`, mas a responsabilidade civil **continua na origem**.
 
+### `POST /api/v1/custodia/termos/:id/entrega`
+
+```jsonc
+{
+  "geolocalizacao": { "lat": -25.4809, "lng": -49.3044 },
+  "observacao": "Chave na recepção, vaga 12."
+}
+```
+
+"Deixei no pátio de vocês." Declarada por **quem levou** o carro
+(`403 DROP_OFF_MUST_BE_DECLARED_BY_CARRIER` para qualquer outro), só a partir de
+um termo em trânsito (`409 TRANSFER_NOT_IN_TRANSIT`).
+
+A geolocalização é **obrigatória** (`400 DROP_OFF_GEOLOCATION_REQUIRED`) — é a
+razão de a declaração existir. Sem coordenada, "deixei no pátio" é a palavra de
+um contra a do outro, que é exatamente a disputa que o livro de custódia existe
+para não ter. Não é prova irrefutável, e não pretende ser: é registro datado,
+assinado e posicionado.
+
+**Não transfere responsabilidade civil.** O termo vai para `DROPPED_OFF` e o
+veículo para `AWAITING_ACCEPTANCE`; o custodiante continua sendo quem levou. Só
+a entrada assinada move multa, avaria e sinistro.
+
+Existe porque entrega e conferência quase nunca coincidem: o motorista chega às
+18h40, o pátio fechou, e o gerente assina às 8h. Sem este estado, essas 13 horas
+ficam indistinguíveis de "carro sumido no caminho".
+
 ### `POST /api/v1/custodia/termos/:id/entrada`
 
 Mesmo formato. Assinada pela loja de **destino** — é neste instante que multa,

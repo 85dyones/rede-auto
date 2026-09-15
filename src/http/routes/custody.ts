@@ -9,6 +9,7 @@ import type { AppContext } from '../../application/context.ts';
 import {
   abortCustodyTransfer,
   completeCustodyTransfer,
+  declareVehicleDropOff,
   custodianAt,
   custodyHistory,
   deliverVehicleToConsumer,
@@ -21,6 +22,7 @@ import {
   withdrawRecall,
 } from '../../application/custody-service.ts';
 import type { Router } from '../router.ts';
+import { validationError } from '../../domain/shared/errors.ts';
 import { errorResponse, json } from '../http-types.ts';
 import { custodyPeriodDto, dealDto, recallDto, transferDto } from '../serialize.ts';
 import { asObject, oneOf, optionalText, queryInstant, text } from '../parse.ts';
@@ -62,6 +64,44 @@ export function registerCustodyRoutes(router: Router, context: AppContext): void
    * Fecha o termo com a entrada no destino. E este instante — e nao a saida —
    * que transfere a responsabilidade civil.
    */
+  /**
+   * "Deixei no patio de voces." Declaracao geolocalizada de quem levou o carro.
+   *
+   * Nao transfere responsabilidade — o aceite de quem recebe faz isso. Existe
+   * para o caso em que a entrega e a conferencia nao coincidem no tempo.
+   */
+  router.post('/api/v1/custodia/termos/:id/entrega', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const body = asObject(request.body);
+    if (!body.ok) return errorResponse(body.error, request.requestId);
+
+    const geo = body.value['geolocalizacao'];
+    const lat = typeof geo === 'object' && geo !== null ? (geo as Record<string, unknown>)['lat'] : undefined;
+    const lng = typeof geo === 'object' && geo !== null ? (geo as Record<string, unknown>)['lng'] : undefined;
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      return errorResponse(
+        validationError(
+          'DROP_OFF_GEOLOCATION_REQUIRED',
+          'Informe geolocalizacao { lat, lng }: sem coordenada, "deixei no patio" nao e registro.',
+        ),
+        request.requestId,
+      );
+    }
+
+    const result = await declareVehicleDropOff(
+      context,
+      actor.value,
+      asCustodyTransferId(request.params['id'] as string),
+      { lat, lng },
+      optionalText(body.value, 'observacao') ?? null,
+    );
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(200, { termo: transferDto(result.value) });
+  });
+
   router.post('/api/v1/custodia/termos/:id/entrada', async (request) => {
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);

@@ -250,6 +250,29 @@ Três regras impedem que o escape vire uma forma de ganhar tempo:
 loja ainda deve alguma coisa?" — e é ele que o varredor consulta antes de marcar
 descumprimento.
 
+## Trava: o relógio para enquanto o carro viaja
+
+A trava é exclusividade para atender um cliente, e não se atende cliente com o
+carro no guincho. Quando o veículo sai rumo a **quem detém a trava**, o relógio
+para; quando chega (ou a viagem morre), volta a correr com o tempo devolvido.
+
+Sem isso, a parceira queima exclusividade esperando transporte — e o incentivo
+vira travar só depois de o carro chegar, que é quando a corrida pelo carro já
+aconteceu.
+
+Dois tetos cortam, e os dois precisam existir:
+
+| Teto | O que impede |
+|---|---|
+| `maxTransitSuspensionMs` (24 h) | carro perdido no caminho segurar o veículo fora do catálogo por dias |
+| `maxTotalMs` (5 dias, da **abertura**) | suspender virar um jeito de furar o teto absoluto |
+
+`isActive` devolve `true` para uma trava suspensa mesmo passado o `expiresAt`
+original — sem isso o varredor expiraria a trava no meio da viagem.
+
+Carro indo para qualquer loja **que não seja a detentora** não suspende nada: o
+atendimento dela não é afetado, e ela pode estar vendendo sem nunca ver o carro.
+
 ## Custódia
 
 ```

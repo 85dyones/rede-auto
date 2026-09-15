@@ -7,7 +7,10 @@ import {
   expireLockIfDue,
   extendLock,
   isActive,
+  isSuspended,
   openLock,
+  resumeAfterTransit,
+  suspendForTransit,
   releaseLock,
   remainingMs,
   type CommercialLock,
@@ -545,6 +548,92 @@ describe('liberacao antecipada e conversao em venda', () => {
     );
     assert.equal(result.events.length, 0);
     assert.equal(result.state.lock.status, LockStatus.EXPIRED);
+  });
+});
+
+
+/**
+ * A trava e exclusividade para atender um cliente, e nao se atende cliente com
+ * o carro no guincho. Enquanto o veiculo viaja ate quem travou, o relogio para.
+ */
+describe('relogio parado durante o transito', () => {
+  test('sair rumo a quem travou para o relogio', () => {
+    const { lock } = lockedByB(availableVehicle());
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + 10 * 60_000)).state;
+
+    assert.equal(isSuspended(parado), true);
+    assert.equal(parado.suspendedAt, T0 + 10 * 60_000);
+  });
+
+  test('carro indo para outro lugar nao para relogio nenhum', () => {
+    // A Loja B travou; o carro vai para a Loja C. O atendimento da B nao e
+    // afetado — ela pode estar vendendo sem nunca ver o carro.
+    const { lock } = lockedByB(availableVehicle());
+    const transicao = unwrap(suspendForTransit(lock, asStoreId('str_terceira'), T0 + 10 * 60_000));
+
+    assert.equal(transicao.events.length, 0, 'nada acontece');
+    assert.equal(isSuspended(transicao.state), false);
+  });
+
+  test('a trava parada nao vence, mesmo passado o prazo original', () => {
+    // Sem isto o varredor expiraria a trava com o carro ainda no caminho.
+    const { lock } = lockedByB(availableVehicle());
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR)).state;
+
+    assert.equal(isActive(parado, T0 + 9 * HOUR), true, 'relogio parado nao corre');
+  });
+
+  test('chegar devolve exatamente o tempo de viagem', () => {
+    const { lock } = lockedByB(availableVehicle());
+    const prazoOriginal = lock.expiresAt;
+
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR)).state;
+    const voltou = unwrap(resumeAfterTransit(parado, T0 + 3 * HOUR)).state;
+
+    assert.equal(isSuspended(voltou), false);
+    assert.equal(voltou.expiresAt, prazoOriginal + 2 * HOUR, 'duas horas de viagem, duas de volta');
+    assert.equal(voltou.suspendedMs, 2 * HOUR);
+  });
+
+  test('viagem longa demais nao segura o carro: o teto de transito corta', () => {
+    // Dentro de uma praca de 60 km, um carro que nao chegou em um dia nao esta
+    // viajando — e o prazo volta a correr enquanto alguem resolve.
+    const { lock } = lockedByB(availableVehicle());
+    const prazoOriginal = lock.expiresAt;
+
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR)).state;
+    const voltou = unwrap(resumeAfterTransit(parado, T0 + HOUR + 3 * DAY)).state;
+
+    assert.equal(
+      voltou.expiresAt,
+      prazoOriginal + DEFAULT_LOCK_POLICY.maxTransitSuspensionMs,
+      'devolve 24h, nao tres dias',
+    );
+  });
+
+  test('suspender nunca vira um jeito de furar o teto absoluto', () => {
+    // O teto de 5 dias e contado da ABERTURA e continua valendo por cima.
+    const { lock } = lockedByB(availableVehicle());
+    const quaseNoTeto: CommercialLock = {
+      ...lock,
+      expiresAt: T0 + DEFAULT_LOCK_POLICY.maxTotalMs - HOUR,
+    };
+
+    const parado = unwrap(suspendForTransit(quaseNoTeto, lojaB.id, T0 + HOUR)).state;
+    const voltou = unwrap(resumeAfterTransit(parado, T0 + 20 * HOUR)).state;
+
+    assert.equal(
+      voltou.expiresAt,
+      T0 + DEFAULT_LOCK_POLICY.maxTotalMs,
+      'o teto da abertura corta o que a suspensao devolveria',
+    );
+  });
+
+  test('retomar uma trava que nunca parou nao faz nada', () => {
+    const { lock } = lockedByB(availableVehicle());
+    const transicao = unwrap(resumeAfterTransit(lock, T0 + HOUR));
+    assert.equal(transicao.events.length, 0);
+    assert.equal(transicao.state.expiresAt, lock.expiresAt);
   });
 });
 

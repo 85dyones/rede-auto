@@ -285,6 +285,10 @@ function parseGeolocation(input: unknown): { lat: number; lng: number } | null {
   const lat = record['lat'];
   const lng = record['lng'];
   if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+  // Number.isFinite alem do typeof: NaN e Infinity SAO number, e toda comparacao
+  // de faixa com NaN e falsa — entao a checagem de limites sozinha os deixaria
+  // passar, e a coordenada viraria `null` silenciosamente no JSON.
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
 }
@@ -401,11 +405,37 @@ export type TransferPurpose = (typeof TransferPurpose)[keyof typeof TransferPurp
 export const TransferStatus = {
   /** Saida assinada, entrada pendente. Veiculo em transito. */
   OPEN: 'OPEN',
+  /**
+   * Quem levou declarou a entrega no patio de destino, com geolocalizacao.
+   * Falta o aceite de quem recebe — e e o aceite que move a custodia.
+   */
+  DROPPED_OFF: 'DROPPED_OFF',
   COMPLETED: 'COMPLETED',
   /** Saida assinada mas o carro voltou para a origem sem chegar ao destino. */
   CANCELLED: 'CANCELLED',
 } as const;
 export type TransferStatus = (typeof TransferStatus)[keyof typeof TransferStatus];
+
+/**
+ * Declaracao de entrega: "deixei o carro no patio de voces".
+ *
+ * A geolocalizacao e **obrigatoria** aqui, ao contrario da vistoria, onde e
+ * opcional. E a razao de existir da declaracao: sem coordenada, "deixei no
+ * patio" e a palavra de um contra a do outro — exatamente a disputa que o
+ * livro de custodia existe para nao ter.
+ *
+ * Nao e prova irrefutavel (celular mente, alguem pode declarar do
+ * estacionamento ao lado), e nao pretende ser. E registro datado, assinado e
+ * posicionado, que e o que resolve 99% dos casos reais entre parceiros.
+ */
+export type DropOffDeclaration = {
+  readonly declaredByStoreId: StoreId;
+  readonly declaredByUserId: UserId;
+  readonly at: Instant;
+  readonly geolocation: { readonly lat: number; readonly lng: number };
+  /** "Chave na recepcao, vaga 12." O que o recebedor precisa para achar o carro. */
+  readonly note: string | null;
+};
 
 export type CustodyTransfer = {
   readonly id: CustodyTransferId;
@@ -415,6 +445,7 @@ export type CustodyTransfer = {
   readonly purpose: TransferPurpose;
   readonly status: TransferStatus;
   readonly checkout: InspectionTerm;
+  readonly dropOff: DropOffDeclaration | null;
   readonly checkin: InspectionTerm | null;
   readonly openedAt: Instant;
   readonly closedAt: Instant | null;
@@ -526,6 +557,7 @@ export function openTransfer(command: OpenTransferCommand): Transition<VehicleWi
     purpose: command.purpose,
     status: TransferStatus.OPEN,
     checkout,
+    dropOff: null,
     checkin: null,
     openedAt: now,
     closedAt: null,
@@ -572,10 +604,104 @@ export type CheckInCommand = {
  *
  * Este e o instante exato em que a responsabilidade civil muda de loja.
  */
+export type DeclareDropOffCommand = {
+  readonly vehicle: Vehicle;
+  readonly transfer: CustodyTransfer;
+  readonly actorStoreId: StoreId;
+  readonly actorUserId: UserId;
+  readonly geolocation: { readonly lat: number; readonly lng: number };
+  readonly note?: string | null;
+  readonly now: Instant;
+};
+
+/**
+ * Quem levou o carro declara que o deixou no patio de destino.
+ *
+ * Nao move a custodia. O carro esta la, mas quem recebe ainda nao conferiu — e
+ * conferir e o que transfere multa, avaria e sinistro. Declarar entrega e
+ * assumir uma posicao registrada, nao se livrar da responsabilidade.
+ *
+ * Quem declara e a loja de ORIGEM do termo, que e quem estava com o carro.
+ */
+export function declareDropOff(command: DeclareDropOffCommand): Transition<VehicleWithTransfer> {
+  const { vehicle, transfer, actorStoreId, now } = command;
+
+  if (transfer.status !== TransferStatus.OPEN) {
+    return err(
+      conflictError(
+        'TRANSFER_NOT_IN_TRANSIT',
+        'So um termo em transito pode receber declaracao de entrega.',
+        { transferId: transfer.id, status: transfer.status },
+      ),
+    );
+  }
+  if (actorStoreId !== transfer.fromStoreId) {
+    return err(
+      forbiddenError(
+        'DROP_OFF_MUST_BE_DECLARED_BY_CARRIER',
+        'Quem declara a entrega e a loja que levou o veiculo.',
+        { expectedStoreId: transfer.fromStoreId, actorStoreId },
+      ),
+    );
+  }
+
+  const geo = parseGeolocation(command.geolocation);
+  if (geo === null) {
+    return err(
+      validationError(
+        'DROP_OFF_GEOLOCATION_REQUIRED',
+        'A entrega precisa de geolocalizacao: sem coordenada, "deixei no patio" nao e registro.',
+        { transferId: transfer.id },
+      ),
+    );
+  }
+
+  const dropOff: DropOffDeclaration = {
+    declaredByStoreId: actorStoreId,
+    declaredByUserId: command.actorUserId,
+    at: now,
+    geolocation: geo,
+    note: command.note ?? null,
+  };
+
+  const declared: CustodyTransfer = {
+    ...transfer,
+    status: TransferStatus.DROPPED_OFF,
+    dropOff,
+  };
+
+  const parked: Vehicle = {
+    ...vehicle,
+    physical: {
+      ...vehicle.physical,
+      state: PhysicalState.AWAITING_ACCEPTANCE,
+      // A custodia NAO muda aqui. Continua com quem levou ate o aceite.
+      since: now,
+    },
+    updatedAt: now,
+  };
+
+  return transitioned({ vehicle: parked, transfer: declared }, [
+    domainEvent('custody.dropped_off', vehicle.id, now, {
+      transferId: transfer.id,
+      fromStoreId: transfer.fromStoreId,
+      toStoreId: transfer.toStoreId,
+      purpose: transfer.purpose,
+      lat: geo.lat,
+      lng: geo.lng,
+      recallId: transfer.recallId,
+    }),
+  ]);
+}
+
 export function checkIn(command: CheckInCommand): Transition<VehicleWithTransfer> {
   const { vehicle, transfer, checkin, now } = command;
 
-  if (transfer.status !== TransferStatus.OPEN) {
+  // Aceita tanto o carro que chegou com alguem para receber (OPEN) quanto o que
+  // foi deixado e esperou o expediente (DROPPED_OFF).
+  const aberto =
+    transfer.status === TransferStatus.OPEN || transfer.status === TransferStatus.DROPPED_OFF;
+  if (!aberto) {
     return err(
       conflictError('TRANSFER_NOT_OPEN', 'Este termo de custodia ja foi encerrado.', {
         transferId: transfer.id,
@@ -673,7 +799,14 @@ export type CancelTransferCommand = {
 export function cancelTransfer(command: CancelTransferCommand): Transition<VehicleWithTransfer> {
   const { vehicle, transfer, now } = command;
 
-  if (transfer.status !== TransferStatus.OPEN) {
+  // Cancelar tambem vale depois da entrega declarada: e o caminho da recusa —
+  // o recebedor abre o portao, ve que nao e o carro combinado (ou que chegou
+  // batido) e devolve. O carro volta para quem levou, que nunca deixou de ser
+  // o custodiante. A declaracao geolocalizada fica no historico, e e ela que
+  // sustenta a conversa sobre quem pagou o guincho de volta.
+  const encerravel =
+    transfer.status === TransferStatus.OPEN || transfer.status === TransferStatus.DROPPED_OFF;
+  if (!encerravel) {
     return err(
       conflictError('TRANSFER_NOT_OPEN', 'Este termo de custodia ja foi encerrado.', {
         transferId: transfer.id,

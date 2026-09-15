@@ -72,6 +72,17 @@ export const PhysicalState = {
   AT_YARD: 'AT_YARD',
   /** Termo de custodia aberto: saiu da origem, ainda nao deu entrada no destino. */
   IN_TRANSIT: 'IN_TRANSIT',
+  /**
+   * Entregue no patio de destino e declarado com geolocalizacao, mas ainda sem
+   * o aceite de quem recebe. O carro esta la; a responsabilidade civil, nao —
+   * ela so muda na assinatura da entrada.
+   *
+   * Existe porque a entrega quase nunca coincide com a conferencia: o motorista
+   * deixa o carro as 18h40, o patio ja fechou, e o gerente assina as 8h do dia
+   * seguinte. Sem este estado, essas 13 horas ficam indistinguiveis de "carro
+   * sumido no caminho".
+   */
+  AWAITING_ACCEPTANCE: 'AWAITING_ACCEPTANCE',
   /** Entregue ao comprador final. Estado terminal. */
   DELIVERED_TO_CONSUMER: 'DELIVERED_TO_CONSUMER',
 } as const;

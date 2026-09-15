@@ -24,11 +24,17 @@ import {
 } from '../domain/shared/ids.ts';
 import { hasManagerPowers } from '../domain/network/store.ts';
 import {
+  type CommercialLock,
+  resumeAfterTransit,
+  suspendForTransit,
+} from '../domain/lock/commercial-lock.ts';
+import {
   type CustodyTransfer,
   type InspectionTerm,
   type TransferPurpose,
   TransferPurpose as Purpose,
   cancelTransfer,
+  declareDropOff,
   checkIn,
   deliverToConsumer,
   openTransfer,
@@ -104,7 +110,46 @@ export async function startCustodyTransfer(
   await context.repos.vehicles.save(state.vehicle);
   await context.repos.transfers.save(state.transfer);
   await publish(context, events, actor);
+
+  // O carro saiu rumo a quem travou: o relogio da exclusividade para aqui e so
+  // volta na chegada. Nao se atende cliente com o carro no guincho.
+  await suspendLockForTransit(context, loaded.value.lock, input.toStoreId, actor);
+
   return ok({ vehicle: state.vehicle, transfer: state.transfer });
+}
+
+/** Para o relogio da trava quando o veiculo sai a caminho de quem a detem. */
+async function suspendLockForTransit(
+  context: AppContext,
+  lock: CommercialLock | null,
+  toStoreId: StoreId,
+  actor: Actor,
+): Promise<void> {
+  if (lock === null) return;
+  const transition = suspendForTransit(lock, toStoreId, context.clock.now());
+  if (!transition.ok || transition.value.events.length === 0) return;
+
+  await context.repos.locks.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
+}
+
+/**
+ * Devolve o tempo parado. Chamado tanto na chegada quanto no cancelamento da
+ * viagem: nos dois casos o carro parou de viajar, e o relogio precisa voltar.
+ */
+async function resumeLockAfterTransit(
+  context: AppContext,
+  vehicleId: VehicleId,
+  actor: Actor,
+): Promise<void> {
+  const lock = await context.repos.locks.activeByVehicle(vehicleId);
+  if (lock === undefined) return;
+
+  const transition = resumeAfterTransit(lock, context.clock.now(), context.policies.lock);
+  if (!transition.ok || transition.value.events.length === 0) return;
+
+  await context.repos.locks.save(transition.value.state);
+  await publish(context, transition.value.events, actor);
 }
 
 export async function completeCustodyTransfer(
@@ -137,6 +182,9 @@ export async function completeCustodyTransfer(
   await context.repos.transfers.save(state.transfer);
   await publish(context, events, actor);
 
+  // Chegou: o relogio da trava volta a correr, com o tempo de viagem devolvido.
+  await resumeLockAfterTransit(context, asVehicleId(transfer.vehicleId), actor);
+
   // O carro chegou ao patio da dona: e isso que cumpre o recall.
   const recall = await settleRecallOnArrival(context, state.vehicle.ownerStoreId, state.transfer);
   return ok({ transfer: state.transfer, recall });
@@ -165,6 +213,44 @@ async function settleRecallOnArrival(
   return transition.value.state;
 }
 
+/**
+ * Quem levou o carro declara a entrega no patio de destino, com geolocalizacao.
+ *
+ * Nao move a custodia: o aceite de quem recebe e que faz isso. Serve para o caso
+ * em que a entrega e a conferencia nao coincidem — o motorista chega as 18h40 e
+ * o patio ja fechou.
+ */
+export async function declareVehicleDropOff(
+  context: AppContext,
+  actor: Actor,
+  transferId: CustodyTransferId,
+  geolocation: { readonly lat: number; readonly lng: number },
+  note?: string | null,
+): Promise<Result<CustodyTransfer, DomainError>> {
+  const transfer = await context.repos.transfers.byId(transferId);
+  if (transfer === undefined) return err(transferNotFound(transferId));
+
+  const loaded = await loadVehicle(context, actor, asVehicleId(transfer.vehicleId));
+  if (!loaded.ok) return loaded;
+
+  const transition = declareDropOff({
+    vehicle: loaded.value.vehicle,
+    transfer,
+    actorStoreId: actor.store.id,
+    actorUserId: actor.user.id,
+    geolocation,
+    ...(note === undefined ? {} : { note }),
+    now: context.clock.now(),
+  });
+  if (!transition.ok) return transition;
+
+  const { state, events } = transition.value;
+  await context.repos.vehicles.save(state.vehicle);
+  await context.repos.transfers.save(state.transfer);
+  await publish(context, events, actor);
+  return ok(state.transfer);
+}
+
 export async function abortCustodyTransfer(
   context: AppContext,
   actor: Actor,
@@ -190,6 +276,10 @@ export async function abortCustodyTransfer(
   await context.repos.vehicles.save(state.vehicle);
   await context.repos.transfers.save(state.transfer);
   await publish(context, events, actor);
+
+  // A viagem morreu: o carro parou de viajar, entao o relogio volta tambem.
+  await resumeLockAfterTransit(context, asVehicleId(transfer.vehicleId), actor);
+
   return ok(state.transfer);
 }
 

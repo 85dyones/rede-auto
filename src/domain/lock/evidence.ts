@@ -49,11 +49,22 @@ export type LockPolicy = {
    * (4 + 72 + 48 + 24 + 4x2 + 2x2), entao o teto de 120h realmente corta.
    */
   readonly maxTotalMs: number;
+  /**
+   * Teto da suspensao por transito. O relogio da trava para enquanto o carro
+   * viaja ate quem travou — mas nao para indefinidamente: carro parado no
+   * caminho nao pode segurar um veiculo da rede fora do catalogo.
+   *
+   * 24h em relogio de parede. Dentro de uma praca de 60 km de raio, um carro que
+   * nao chegou em um dia nao esta viajando: o problema e outro, e o prazo volta
+   * a correr enquanto alguem resolve.
+   */
+  readonly maxTransitSuspensionMs: number;
   readonly grants: Readonly<Record<EvidenceType, EvidenceGrant>>;
 };
 
 export const DEFAULT_LOCK_POLICY: LockPolicy = {
   baseTtlMs: 4 * HOUR,
+  maxTransitSuspensionMs: 24 * HOUR,
   maxTotalMs: 5 * 24 * HOUR,
   grants: {
     [EvidenceType.TRADE_IN_APPRAISAL]: {

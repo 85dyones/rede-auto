@@ -219,6 +219,12 @@ export function transferDto(transfer: CustodyTransfer) {
     fechadoEm: instant(transfer.closedAt),
     recallId: transfer.recallId,
     saida: termDto(transfer.checkout),
+    entrega: transfer.dropOff === null ? null : {
+      declaradaPorLojaId: transfer.dropOff.declaredByStoreId,
+      declaradaEm: instant(transfer.dropOff.at),
+      geolocalizacao: transfer.dropOff.geolocation,
+      observacao: transfer.dropOff.note,
+    },
     entrada: transfer.checkin === null ? null : termDto(transfer.checkin),
     divergencias: transfer.discrepancies.map((discrepancy) => ({
       tipo: discrepancy.kind,

@@ -9,6 +9,7 @@ import {
   cancelTransfer,
   checkIn,
   computeTermHash,
+  declareDropOff,
   deliverToConsumer,
   detectDiscrepancies,
   openTransfer,
@@ -34,6 +35,7 @@ const network = buildFoundingNetwork(6);
 const lojaA = network.founderAt(0);
 const lojaB = network.founderAt(1);
 const lojaC = network.founderAt(2);
+const gerenteA = network.principalAt(0);
 
 const T0 = Date.parse('2026-08-24T13:00:00Z');
 const TRANSFER_ID = asCustodyTransferId('cst_0001');
@@ -203,6 +205,128 @@ describe('saida do patio (checkout)', () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'SAME_STORE_TRANSFER');
+  });
+});
+
+/**
+ * Entrega e conferencia quase nunca coincidem: o motorista deixa o carro as
+ * 18h40 e o gerente assina as 8h do dia seguinte. Sem um estado para essas 13
+ * horas, elas ficam indistinguiveis de "carro sumido no caminho".
+ */
+describe('entrega declarada com geolocalizacao', () => {
+  const NO_PATIO = { lat: -25.4809, lng: -49.3044 };
+
+  function entregue(at = T0 + 2 * HOUR) {
+    const opened = openAtoB(vehicleAtA());
+    return unwrap(
+      declareDropOff({
+        vehicle: opened.vehicle,
+        transfer: opened.transfer,
+        actorStoreId: lojaA.id,
+        actorUserId: gerenteA.id,
+        geolocation: NO_PATIO,
+        note: 'Chave na recepcao, vaga 12.',
+        now: at,
+      }),
+    ).state;
+  }
+
+  test('declarar entrega NAO transfere a responsabilidade civil', () => {
+    // O carro esta la; quem recebe ainda nao conferiu. Declarar entrega e
+    // assumir uma posicao registrada, nao se livrar da responsabilidade.
+    const state = entregue();
+
+    assert.equal(state.transfer.status, TransferStatus.DROPPED_OFF);
+    assert.equal(state.vehicle.physical.state, PhysicalState.AWAITING_ACCEPTANCE);
+    assert.equal(
+      state.vehicle.physical.custodianStoreId,
+      lojaA.id,
+      'continua com quem levou ate o aceite',
+    );
+    assert.deepEqual(state.transfer.dropOff?.geolocation, NO_PATIO);
+  });
+
+  test('sem coordenada nao ha registro', () => {
+    const opened = openAtoB(vehicleAtA());
+    const result = declareDropOff({
+      vehicle: opened.vehicle,
+      transfer: opened.transfer,
+      actorStoreId: lojaA.id,
+      actorUserId: gerenteA.id,
+      geolocation: { lat: Number.NaN, lng: -49.3 },
+      now: T0 + HOUR,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'DROP_OFF_GEOLOCATION_REQUIRED');
+  });
+
+  test('quem declara e quem levou, nao quem recebe', () => {
+    const opened = openAtoB(vehicleAtA());
+    const result = declareDropOff({
+      vehicle: opened.vehicle,
+      transfer: opened.transfer,
+      actorStoreId: lojaB.id,
+      actorUserId: gerenteA.id,
+      geolocation: NO_PATIO,
+      now: T0 + HOUR,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'DROP_OFF_MUST_BE_DECLARED_BY_CARRIER');
+  });
+
+  test('o aceite depois da entrega fecha o termo e move a custodia', () => {
+    const entregueState = entregue();
+    const aceiteAt = T0 + 14 * HOUR;
+
+    const { state } = unwrap(
+      checkIn({
+        vehicle: entregueState.vehicle,
+        transfer: entregueState.transfer,
+        checkin: buildSignedTerm(lojaB.id, aceiteAt, { odometerKm: 38_430 }),
+        now: aceiteAt,
+      }),
+    );
+
+    assert.equal(state.transfer.status, TransferStatus.COMPLETED);
+    assert.equal(state.vehicle.physical.custodianStoreId, lojaB.id);
+    assert.equal(state.vehicle.physical.state, PhysicalState.AT_YARD);
+    assert.notEqual(state.transfer.dropOff, null, 'a declaracao fica no historico');
+  });
+
+  test('o recebedor pode recusar: o carro volta para quem levou', () => {
+    // Abriu o portao, viu que nao e o carro combinado. A declaracao
+    // geolocalizada fica — e e ela que sustenta a conversa sobre o guincho.
+    const entregueState = entregue();
+    const { state } = unwrap(
+      cancelTransfer({
+        vehicle: entregueState.vehicle,
+        transfer: entregueState.transfer,
+        actorStoreId: lojaB.id,
+        reason: 'Veiculo chegou com avaria nao declarada.',
+        now: T0 + 3 * HOUR,
+      }),
+    );
+
+    assert.equal(state.transfer.status, TransferStatus.CANCELLED);
+    assert.equal(state.vehicle.physical.custodianStoreId, lojaA.id);
+    assert.notEqual(state.transfer.dropOff, null);
+  });
+
+  test('nao se declara entrega duas vezes', () => {
+    const entregueState = entregue();
+    const result = declareDropOff({
+      vehicle: entregueState.vehicle,
+      transfer: entregueState.transfer,
+      actorStoreId: lojaA.id,
+      actorUserId: gerenteA.id,
+      geolocation: NO_PATIO,
+      now: T0 + 4 * HOUR,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'TRANSFER_NOT_IN_TRANSIT');
   });
 });
 
