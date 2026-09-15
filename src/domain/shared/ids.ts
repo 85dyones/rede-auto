@@ -24,6 +24,7 @@ export type ShareLinkId = Branded<string, 'ShareLinkId'>;
 export type ApplicationId = Branded<string, 'ApplicationId'>;
 export type IngestionRunId = Branded<string, 'IngestionRunId'>;
 export type AuditEntryId = Branded<string, 'AuditEntryId'>;
+export type ChargeId = Branded<string, 'ChargeId'>;
 
 export const IdPrefix = {
   cluster: 'clu',
@@ -40,6 +41,7 @@ export const IdPrefix = {
   application: 'app',
   ingestionRun: 'ing',
   auditEntry: 'aud',
+  charge: 'chg',
 } as const;
 
 export type IdPrefix = (typeof IdPrefix)[keyof typeof IdPrefix];
@@ -71,6 +73,7 @@ export function sequentialIdGenerator(): IdGenerator {
 // Construtores nominais. Sao apenas casts, mas centralizam o ponto onde uma
 // string "crua" (vinda de HTTP, de um feed, do banco) vira um id tipado.
 export const asClusterId = (value: string): ClusterId => value as ClusterId;
+export const asChargeId = (value: string): ChargeId => value as ChargeId;
 export const asMemberId = (value: string): MemberId => value as MemberId;
 export const asStoreId = (value: string): StoreId => value as StoreId;
 export const asUserId = (value: string): UserId => value as UserId;

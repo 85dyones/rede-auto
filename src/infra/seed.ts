@@ -12,6 +12,7 @@
 
 import { StoreStatus, UserRole, type NetworkUser, type Store } from '../domain/network/store.ts';
 import { MemberKind, memberFromFirstStore, type Member } from '../domain/network/member.ts';
+import { PILOT_TARIFF } from '../domain/billing/tariff.ts';
 import { asClusterId, asMemberId, asStoreId, asUserId, asVehicleId } from '../domain/shared/ids.ts';
 import {
   type Cluster,
@@ -30,6 +31,7 @@ import {
   createVehicle,
 } from '../domain/vehicle/vehicle.ts';
 import type { Actor, AppContext } from '../application/context.ts';
+import { chargeAdhesion, registerChargePayment } from '../application/billing-service.ts';
 import type { ApiKeyRegistry } from './auth/api-keys.ts';
 
 export type SeededStore = {
@@ -239,6 +241,7 @@ export async function seedFoundingNetwork(
       MemberKind.FOUNDER,
       null,
       now,
+      PILOT_TARIFF.version,
     );
 
     const store: Store = {
@@ -281,6 +284,12 @@ export async function seedFoundingNetwork(
       userId: salesperson.id,
       label: `${founder.tradeName} / vendedor`,
     });
+
+    // A adesao das fundadoras: emitida e ja quitada. Elas pagaram na
+    // constituicao — comecar o piloto com dez empresas a dez dias do
+    // vencimento faria a primeira varredura parecer uma crise de inadimplencia.
+    const adesao = await chargeAdhesion(context, member);
+    if (adesao.ok) await registerChargePayment(context, adesao.value.id);
 
     stores.push({ member, store, principal, salesperson, principalApiKey, salespersonApiKey });
   }

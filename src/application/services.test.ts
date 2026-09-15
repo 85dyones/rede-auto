@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 
 import { buildApplication, type Application } from '../bootstrap.ts';
 import { loadConfig } from '../config.ts';
-import { DAY, FakeClock, HOUR } from '../domain/shared/clock.ts';
+import { DAY, FakeClock, HOUR, addMonths } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
 import { seededActor } from '../infra/seed.ts';
 import { fromReais } from '../domain/shared/money.ts';
+import { unwrap } from '../domain/shared/result.ts';
 import { FuelType, TradeInStance, TransmissionType } from '../domain/vehicle/vehicle.ts';
 import { asClusterId, asMemberId, asStoreId, asUserId } from '../domain/shared/ids.ts';
 import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody.ts';
@@ -15,6 +16,16 @@ import { loadVehicle, openCommercialLock, registerVehicle, searchCatalog } from 
 import { startCustodyTransfer } from './custody-service.ts';
 import { endorseApplication, submitApplication, viewApplication } from './governance-service.ts';
 import { MemberKind, MemberStatus, type Member } from '../domain/network/member.ts';
+import { StoreStatus, canTransact } from '../domain/network/store.ts';
+import { ChargeKind } from '../domain/billing/charge.ts';
+import { PILOT_TARIFF } from '../domain/billing/tariff.ts';
+import {
+  chargeAdhesion,
+  memberStatement,
+  registerChargePayment,
+  runBillingSweep,
+} from './billing-service.ts';
+import { openStoreBranch } from './governance-service.ts';
 import { runSweep, startSweeper } from './scheduler.ts';
 
 /** Termo com as cinco fotos obrigatorias — o minimo que a custodia exige. */
@@ -348,45 +359,45 @@ describe('fronteira entre pracas', () => {
   });
 });
 
-describe('janela de fundacao: quem entrar na janela, leva', () => {
-  const candidata = {
-    legalName: 'Nova Garagem Veiculos LTDA',
-    tradeName: 'Nova Garagem',
-    cnpj: '07.526.557/0001-00',
-    city: 'Sao Jose dos Pinhais',
-    state: 'PR',
-    phone: '(41) 99876-5432',
-    email: 'contato@novagaragem.com.br',
-    responsibleName: 'Joao Pereira',
-  };
+const candidata = {
+  legalName: 'Nova Garagem Veiculos LTDA',
+  tradeName: 'Nova Garagem',
+  cnpj: '07.526.557/0001-00',
+  city: 'Sao Jose dos Pinhais',
+  state: 'PR',
+  phone: '(41) 99876-5432',
+  email: 'contato@novagaragem.com.br',
+  responsibleName: 'Joao Pereira',
+};
 
-  /** Apresenta a candidata pela empresa 0 e junta os tres endossos das 1..3. */
-  async function credenciar(app: Application): Promise<Member> {
-    const seed = app.seed!;
+/** Apresenta a candidata pela empresa 0 e junta os tres endossos das 1..3. */
+async function credenciarNova(app: Application): Promise<Member> {
+  const seed = app.seed!;
 
-    const aberta = await submitApplication(app.context, seededActor(seed.stores[0]!), candidata);
-    assert.ok(aberta.ok);
+  const aberta = await submitApplication(app.context, seededActor(seed.stores[0]!), candidata);
+  assert.ok(aberta.ok);
 
-    let ultima = aberta;
-    for (const i of [1, 2, 3]) {
-      const passo = await endorseApplication(
-        app.context,
-        seededActor(seed.stores[i]!),
-        aberta.value.application.id,
-      );
-      assert.ok(passo.ok);
-      ultima = passo;
-    }
-
-    assert.equal(ultima.value.application.status, 'APPROVED');
-    assert.ok(ultima.value.admittedMember !== null, 'o terceiro endosso ja credencia');
-    return ultima.value.admittedMember;
+  let ultima = aberta;
+  for (const i of [1, 2, 3]) {
+    const passo = await endorseApplication(
+      app.context,
+      seededActor(seed.stores[i]!),
+      aberta.value.application.id,
+    );
+    assert.ok(passo.ok);
+    ultima = passo;
   }
 
+  assert.equal(ultima.value.application.status, 'APPROVED');
+  assert.ok(ultima.value.admittedMember !== null, 'o terceiro endosso ja credencia');
+  return ultima.value.admittedMember;
+}
+
+describe('janela de fundacao: quem entrar na janela, leva', () => {
   test('credenciada dentro da janela, a EMPRESA nasce FUNDADORA', async () => {
     const { app } = await novaApp();
 
-    const empresa = await credenciar(app);
+    const empresa = await credenciarNova(app);
     assert.equal(empresa.kind, MemberKind.FOUNDER);
 
     const fundadoras = await app.context.repos.members.founders(empresa.clusterId);
@@ -407,7 +418,7 @@ describe('janela de fundacao: quem entrar na janela, leva', () => {
     // tres endossos, mesmas fundadoras.
     clock.set(praca.foundingWindowEndsAt + DAY);
 
-    const empresa = await credenciar(app);
+    const empresa = await credenciarNova(app);
     assert.equal(empresa.kind, MemberKind.MEMBER);
 
     const fundadoras = await app.context.repos.members.founders(empresa.clusterId);
@@ -440,6 +451,277 @@ describe('janela de fundacao: quem entrar na janela, leva', () => {
     assert.ok(revista.ok);
     assert.equal(revista.value.tally.foundersYetToEndorse, 2, 'sobraram duas ativas alem da padrinho');
     assert.equal(revista.value.tally.reachable, false, 'duas nao fecham tres endossos');
+    await app.stop();
+  });
+});
+
+describe('cobranca: adesao, mensalidade e a suspensao por 30 dias', () => {
+  test('credenciar emite a adesao — e a fundadora paga metade', async () => {
+    const { app } = await novaApp();
+    const empresa = await credenciarNova(app);
+
+    const extrato = unwrap(await memberStatement(app.context, empresa.id));
+    const adesao = extrato.charges.find((c) => c.kind === ChargeKind.ADHESION);
+
+    assert.equal(empresa.kind, MemberKind.FOUNDER, 'janela do piloto aberta');
+    assert.equal(adesao?.amount.cents, 300_000, 'R$ 3.000: metade dos R$ 6.000');
+    await app.stop();
+  });
+
+  test('credenciar duas vezes nao cobra adesao duas vezes', async () => {
+    // O provisionamento pode ser repetido depois de uma falha, e cobrar de novo
+    // por isso seria o pior jeito de comecar uma relacao comercial.
+    const { app } = await novaApp();
+    const empresa = await credenciarNova(app);
+
+    await chargeAdhesion(app.context, empresa);
+    await chargeAdhesion(app.context, empresa);
+
+    const extrato = unwrap(await memberStatement(app.context, empresa.id));
+    const adesoes = extrato.charges.filter((c) => c.kind === ChargeKind.ADHESION);
+    assert.equal(adesoes.length, 1);
+    await app.stop();
+  });
+
+  test('a mensalidade da Prime cobra os dois patios: 599 + 159', async () => {
+    const { app } = await novaApp();
+    const prime = app.seed!.stores[0]!.member;
+
+    const resultado = await runBillingSweep(app.context, prime.clusterId);
+    assert.ok(resultado.issued >= 10, 'todas as empresas do piloto faturadas');
+
+    const extrato = unwrap(await memberStatement(app.context, prime.id));
+    const mensal = extrato.charges.find((c) => c.kind === ChargeKind.MONTHLY);
+
+    assert.equal(extrato.storeCount, 2, 'matriz + Boqueirao');
+    assert.equal(mensal?.breakdown?.extraStores, 1);
+    assert.equal(mensal?.amount.cents, 59_900 + 15_900);
+    await app.stop();
+  });
+
+  test('empresa de uma loja paga so os 599', async () => {
+    const { app } = await novaApp();
+    const veloz = app.seed!.stores[1]!.member;
+
+    await runBillingSweep(app.context, veloz.clusterId);
+    const extrato = unwrap(await memberStatement(app.context, veloz.id));
+
+    assert.equal(extrato.charges.find((c) => c.kind === ChargeKind.MONTHLY)?.amount.cents, 59_900);
+    await app.stop();
+  });
+
+  test('rodar a varredura duas vezes no mesmo ciclo nao duplica a fatura', async () => {
+    const { app } = await novaApp();
+    const prime = app.seed!.stores[0]!.member;
+
+    await runBillingSweep(app.context, prime.clusterId);
+    const segunda = await runBillingSweep(app.context, prime.clusterId);
+
+    assert.equal(segunda.issued, 0, 'o ciclo ja estava faturado');
+    await app.stop();
+  });
+
+  test('patio aberto no meio do ciclo entra na proxima fatura, sem rateio', async () => {
+    const { app, clock } = await novaApp();
+    const veloz = app.seed!.stores[1]!;
+
+    await runBillingSweep(app.context, veloz.member.clusterId);
+    clock.advance(5 * DAY);
+
+    const filial = await openStoreBranch(app.context, seededActor(veloz), {
+      ...veloz.store.profile,
+      tradeName: 'Veloz Seminovos Centro',
+      cnpj: '04252011000209',
+    });
+    assert.ok(filial.ok, JSON.stringify(filial));
+
+    // Ainda no mesmo ciclo: a fatura ja emitida nao muda.
+    const meio = unwrap(await memberStatement(app.context, veloz.member.id));
+    assert.equal(meio.charges.find((c) => c.kind === ChargeKind.MONTHLY)?.amount.cents, 59_900);
+    assert.equal(meio.nextMonthly.cents, 59_900 + 15_900, 'a proxima ja conta a filial');
+
+    clock.set(addMonths(veloz.member.joinedAt, 1));
+    await runBillingSweep(app.context, veloz.member.clusterId);
+
+    const depois = unwrap(await memberStatement(app.context, veloz.member.id));
+    const mensais = depois.charges.filter((c) => c.kind === ChargeKind.MONTHLY);
+    assert.equal(mensais.length, 2);
+    assert.equal(mensais[1]?.amount.cents, 59_900 + 15_900);
+    await app.stop();
+  });
+
+  test('30 dias de atraso suspendem a EMPRESA, e com ela todos os patios', async () => {
+    const { app, clock } = await novaApp();
+    const prime = app.seed!.stores[0]!;
+
+    await runBillingSweep(app.context, prime.member.clusterId);
+    const emitida = unwrap(await memberStatement(app.context, prime.member.id));
+    const fatura = emitida.charges.find((c) => c.kind === ChargeKind.MONTHLY)!;
+
+    clock.set(fatura.dueAt + 29 * DAY);
+    await runBillingSweep(app.context, prime.member.clusterId);
+    assert.equal(
+      (await app.context.repos.members.byId(prime.member.id))?.status,
+      MemberStatus.ACTIVE,
+      '29 dias ainda nao suspendem',
+    );
+
+    clock.set(fatura.dueAt + 30 * DAY);
+    await runBillingSweep(app.context, prime.member.clusterId);
+
+    const suspensa = (await app.context.repos.members.byId(prime.member.id))!;
+    assert.equal(suspensa.status, MemberStatus.SUSPENDED);
+
+    // O patio segue ACTIVE: os dois eixos sao independentes. O que barra a
+    // operacao e `canTransact`, que exige os dois.
+    const patio = (await app.context.repos.stores.byId(prime.store.id))!;
+    assert.equal(patio.status, StoreStatus.ACTIVE);
+    assert.equal(canTransact(patio, suspensa), false);
+
+    // E a filial, que nao fez nada, tambem para: o contrato e um so.
+    const filial = (await app.context.repos.stores.byMember(prime.member.id)).find(
+      (loja) => loja.id !== prime.store.id,
+    )!;
+    assert.equal(canTransact(filial, suspensa), false);
+    await app.stop();
+  });
+
+  test('empresa suspensa nao trava veiculo', async () => {
+    const { app, clock, lojaA } = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaA, cadastro('RGT4B71', '9BWZZZ377VT004251')),
+    );
+
+    await runBillingSweep(app.context, lojaA.member.clusterId);
+    const extrato = unwrap(await memberStatement(app.context, lojaA.member.id));
+    clock.set(extrato.charges[0]!.dueAt + 40 * DAY);
+    await runBillingSweep(app.context, lojaA.member.clusterId);
+
+    const devedora = (await app.context.repos.members.byId(lojaA.member.id))!;
+    const trava = await openCommercialLock(
+      app.context,
+      { ...lojaA, member: devedora },
+      { vehicleId: carro.id },
+    );
+
+    assert.equal(trava.ok, false);
+    assert.equal(trava.ok === false && trava.error.code, 'STORE_NOT_ACTIVE');
+    await app.stop();
+  });
+
+  test('a suspensao nao para a cobranca: ficar suspenso nao sai de graca', async () => {
+    const { app, clock } = await novaApp();
+    const prime = app.seed!.stores[0]!.member;
+
+    await runBillingSweep(app.context, prime.clusterId);
+    const primeira = unwrap(await memberStatement(app.context, prime.id));
+    clock.set(primeira.charges[0]!.dueAt + 40 * DAY);
+    await runBillingSweep(app.context, prime.clusterId);
+
+    const depois = unwrap(await memberStatement(app.context, prime.id));
+    assert.equal(depois.member.status, MemberStatus.SUSPENDED);
+    assert.ok(
+      depois.charges.filter((c) => c.kind === ChargeKind.MONTHLY).length > 1,
+      'o ciclo seguinte foi emitido mesmo com a empresa suspensa',
+    );
+    await app.stop();
+  });
+
+  test('quitar o atraso reativa a empresa na mesma operacao', async () => {
+    const { app, clock } = await novaApp();
+    const prime = app.seed!.stores[0]!.member;
+
+    await runBillingSweep(app.context, prime.clusterId);
+    const primeira = unwrap(await memberStatement(app.context, prime.id));
+    clock.set(primeira.charges[0]!.dueAt + 35 * DAY);
+    await runBillingSweep(app.context, prime.clusterId);
+
+    const suspensa = unwrap(await memberStatement(app.context, prime.id));
+    assert.equal(suspensa.member.status, MemberStatus.SUSPENDED);
+
+    // Quita da mais antiga para a mais nova. A reativacao dispara no pagamento
+    // que derruba o atraso abaixo de 30 dias — que nao e necessariamente o
+    // ultimo: separar pagamento de reativacao deixaria uma janela em que a
+    // empresa ja esta em dia e continua suspensa.
+    const abertas = [...suspensa.charges.filter((c) => c.status === 'OPEN')].sort(
+      (a, b) => a.dueAt - b.dueAt,
+    );
+    const reativacoes = [];
+    for (const cobranca of abertas) {
+      const pago = unwrap(await registerChargePayment(app.context, cobranca.id));
+      if (pago.reinstated !== null) reativacoes.push(pago.reinstated);
+    }
+
+    assert.equal(reativacoes.length, 1, 'reativa uma vez so, no pagamento que cura o atraso');
+    assert.equal(reativacoes[0]?.status, MemberStatus.ACTIVE);
+    assert.equal(
+      (await app.context.repos.members.byId(prime.id))?.status,
+      MemberStatus.ACTIVE,
+    );
+    await app.stop();
+  });
+
+  test('fatura de recuperacao vence 10 dias depois de EMITIDA, nao da competencia', async () => {
+    // A plataforma ficou sem faturar e recupera o ciclo antigo. Ele nao nasce
+    // vencido: ninguem pode estar inadimplente de um boleto que nunca recebeu.
+    const { app, clock } = await novaApp();
+    const prime = app.seed!.stores[0]!.member;
+
+    clock.set(addMonths(prime.joinedAt, 3));
+    await runBillingSweep(app.context, prime.clusterId);
+
+    const extrato = unwrap(await memberStatement(app.context, prime.id));
+    const mensais = extrato.charges.filter((c) => c.kind === ChargeKind.MONTHLY);
+
+    assert.equal(mensais.length, 4, 'quatro competencias recuperadas de uma vez');
+    assert.equal(extrato.overdueDays, 0, 'nenhuma delas nasce vencida');
+    for (const fatura of mensais) {
+      assert.equal(fatura.dueAt, clock.now() + 10 * DAY);
+    }
+    await app.stop();
+  });
+
+  test('quitar uma fatura nao reativa enquanto outra tambem passou dos 30 dias', async () => {
+    // A inadimplencia olha a cobranca ABERTA mais antiga. Quitar a pior so cura
+    // se o que sobrou estiver dentro do prazo — e aqui nao esta.
+    const { app, clock } = await novaApp();
+    const prime = app.seed!.stores[0]!.member;
+
+    await runBillingSweep(app.context, prime.clusterId);
+    clock.set(addMonths(prime.joinedAt, 1));
+    await runBillingSweep(app.context, prime.clusterId);
+
+    const duas = unwrap(await memberStatement(app.context, prime.id));
+    const abertas = [...duas.charges.filter((c) => c.status === 'OPEN')].sort(
+      (a, b) => a.dueAt - b.dueAt,
+    );
+    assert.ok(abertas.length >= 2, 'duas competencias, emitidas em datas diferentes');
+
+    // Passado o prazo da MAIS NOVA: agora as duas estao vencidas ha mais de 30.
+    clock.set(abertas[abertas.length - 1]!.dueAt + 31 * DAY);
+    await runBillingSweep(app.context, prime.clusterId);
+    assert.equal(
+      (await app.context.repos.members.byId(prime.id))?.status,
+      MemberStatus.SUSPENDED,
+    );
+
+    const parcial = unwrap(await registerChargePayment(app.context, abertas[0]!.id));
+    assert.equal(parcial.reinstated, null, 'a outra sozinha ja passa dos 30 dias');
+    assert.equal(
+      (await app.context.repos.members.byId(prime.id))?.status,
+      MemberStatus.SUSPENDED,
+    );
+    await app.stop();
+  });
+
+  test('o extrato so diz "congelada" quando a tabela dela difere da vigente', async () => {
+    // Enquanto as duas coincidem, anunciar congelamento seria prometer um
+    // desconto que ainda nao existe.
+    const { app } = await novaApp();
+    const extrato = unwrap(await memberStatement(app.context, app.seed!.stores[0]!.member.id));
+
+    assert.equal(extrato.tariffVersion, PILOT_TARIFF.version);
+    assert.equal(extrato.tariffFrozen, false);
     await app.stop();
   });
 });

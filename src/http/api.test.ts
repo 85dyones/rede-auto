@@ -1027,6 +1027,56 @@ describe('empresa e patio: a separacao que a tabela de precos exigiu', () => {
   });
 });
 
+describe('financeiro: adesao, mensalidade e o que a empresa consegue conferir', () => {
+  test('o extrato mostra a conta aberta, com memoria de calculo', async () => {
+    const response = await api<{
+      empresa: { lojas: number };
+      proximaMensalidade: { centavos: number };
+      tabela: { versao: string; congelada: boolean };
+      cobrancas: Array<{ especie: string; valor: { centavos: number } }>;
+    }>('GET', '/api/v1/financeiro', { key: PRIME });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.empresa.lojas, 2, 'matriz + Boqueirao');
+    assert.equal(response.body.proximaMensalidade.centavos, 59_900 + 15_900);
+    assert.equal(response.body.tabela.versao, '2026-03');
+  });
+
+  test('o extrato de uma empresa de uma loja so cobra os R$ 599', async () => {
+    const response = await api<{ proximaMensalidade: { centavos: number } }>(
+      'GET', '/api/v1/financeiro', { key: VELOZ },
+    );
+    assert.equal(response.body.proximaMensalidade.centavos, 59_900);
+  });
+
+  test('nao ha como ver o extrato de outra empresa', async () => {
+    // O que uma loja paga nao e assunto da vizinha, mesmo dentro da praca.
+    const prime = await api<{ cobrancas: Array<{ id: string }> }>(
+      'GET', '/api/v1/financeiro', { key: PRIME },
+    );
+    const cobranca = prime.body.cobrancas[0];
+    if (cobranca === undefined) return;
+
+    const response = await api<{ erro: { codigo: string } }>(
+      'POST', `/api/v1/financeiro/cobrancas/${cobranca.id}/pagamento`, { key: VELOZ, body: {} },
+    );
+
+    assert.equal(response.status, 404, '403 ja entregaria que a cobranca existe');
+    assert.equal(response.body.erro.codigo, 'CHARGE_NOT_FOUND');
+  });
+
+  test('a filial ve o extrato da empresa dela — o contrato e um so', async () => {
+    const matriz = await api<{ empresa: { id: string } }>('GET', '/api/v1/financeiro', {
+      key: PRIME,
+    });
+    const filial = await api<{ empresa: { id: string } }>('GET', '/api/v1/financeiro', {
+      key: 'demo_prime_boqueirao',
+    });
+
+    assert.equal(filial.body.empresa.id, matriz.body.empresa.id);
+  });
+});
+
 describe('sincronizacao de feed', () => {
   const feed = (id: string, chassi: string, repasse: string) => `<?xml version="1.0" encoding="UTF-8"?>
 <estoque>

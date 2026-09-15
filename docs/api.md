@@ -16,7 +16,7 @@ usuário)** — o papel do usuário decide o que ele pode fazer.
 plataforma, e não há superfície voltada a ele.
 
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
-> [`decisoes.md`](decisoes.md#25-o-que-ficou-de-fora-e-por-quê).
+> [`decisoes.md`](decisoes.md#27-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
@@ -108,19 +108,44 @@ membro pela adesão cheia. `diasRestantes` existe para a tela poder dizer isso a
 quem está decidindo — é argumento de venda, e o número já vem arredondado para
 cima (meio dia restante ainda é um dia).
 
-### `GET /api/v1/lojas` · `GET /api/v1/lojas/fundadoras`
+### `GET /api/v1/lojas` · `GET /api/v1/empresas` · `GET /api/v1/empresas/fundadoras`
 
-Lojas **da sua praça** — não existe "todas as lojas da instalação". A segunda
-lista apenas as fundadoras do seu cluster (o endosso é contado dentro de uma
-praça só) e traz `endossosParaCredenciar`.
+Duas coisas diferentes, e a URL diz qual: **empresa** é quem paga e endossa,
+**loja** é o pátio. Sempre da sua praça — não existe "todas da instalação".
 
-O `total` dessa rota é uma **contagem**, nunca um número de política: quantas
-fundadoras a praça tem depende de quem foi credenciado antes de a janela de
-fundação fechar, e isso varia por praça.
+O DTO da loja **não** traz `tipo` nem `fundadora`: isso é da empresa, e repetir
+aqui seria convidar as duas respostas a divergirem. Quem precisa da condição da
+empresa pede a empresa; a loja traz `empresaId`.
+
+Cada empresa traz `lojas`, a contagem de pátios — base de cálculo da
+mensalidade. O `total` de `/empresas/fundadoras` é contagem, nunca número de
+política: quantas fundadoras a praça tem depende de quem foi credenciado antes
+de a janela de fundação fechar.
+
+### `POST /api/v1/lojas`
+
+Abre mais um pátio da sua empresa. Só o **titular** — ele muda a mensalidade.
+
+Não passa por endosso: as fundadoras já responderam pela empresa. O que se
+guarda é a identidade — a **raiz do CNPJ** (8 primeiros dígitos) tem de bater
+com a da empresa, senão `422 BRANCH_CNPJ_MISMATCH`. Sem essa guarda, "pátio
+adicional" seria a porta dos fundos para credenciar uma empresa inteira sem
+endosso nenhum, pelo preço de uma filial.
+
+```jsonc
+{ "loja": { "legalName": "…", "tradeName": "…", "cnpj": "11.222.333/0002-62", … } }
+```
+
+Resposta `201` com a loja e `lojasDaEmpresa` — o número que a próxima fatura vai
+usar.
 
 ### `POST /api/v1/credenciamentos`
 
-Apresenta uma candidata. Quem chama vira o padrinho.
+Apresenta uma candidata. A **empresa** de quem chama vira a padrinho.
+
+Empresa que já está na rede é recusada com `409 COMPANY_ALREADY_IN_NETWORK`,
+apontando para `POST /api/v1/lojas`: o que ela quer é abrir um pátio, e entrar
+por candidatura lhe daria um segundo endosso e uma segunda adesão a pagar.
 
 ```jsonc
 {
@@ -171,8 +196,12 @@ Não há corpo de decisão, e isso é proposital: **não existe endosso contrár
 Quem tem restrição simplesmente não endossa. Modelar rejeição daria a cada
 fundadora um veto individual sobre concorrência direta.
 
-Só o **titular** de fundadora ativa endossa, e a padrinho não endossa a própria
-indicação. O terceiro endosso já credencia — a resposta traz `lojaCredenciada`
+Só o **titular** de uma empresa fundadora em dia, por um pátio aberto, endossa —
+e a padrinho não endossa a própria indicação, nem pela filial.
+
+O endosso é da **empresa**, não do pátio: um grupo com três lojas assinando de
+cada uma dá **um** endosso, não três. Sem isso, "três endossos" deixaria de
+significar três empresas respondendo por uma quarta. O terceiro endosso já credencia — a resposta traz `lojaCredenciada`
 preenchida, e o `tipo` dela depende da janela de fundação da praça: `FOUNDER`
 dentro da janela, `MEMBER` depois.
 
@@ -182,6 +211,65 @@ credenciaria sozinha endossando três vezes.
 ### `DELETE /api/v1/credenciamentos/:id`
 
 Retira a candidatura. Só a padrinho pode.
+
+---
+
+## Financeiro
+
+### `GET /api/v1/financeiro`
+
+O extrato da **sua** empresa. Não existe rota para ver o de outra: o que uma
+loja paga não é assunto da vizinha, mesmo dentro da praça.
+
+```jsonc
+{
+  "empresa": { "razaoSocial": "Prime Motors …", "fundadora": true, "lojas": 2 },
+  "emAberto": { "centavos": 75800, "formatado": "R$ 758,00" },
+  "diasEmAtraso": 0,
+  "proximaMensalidade": { "centavos": 75800, "formatado": "R$ 758,00" },
+  "tabela": { "versao": "2026-03", "congelada": false },
+  "cobrancas": [
+    {
+      "especie": "MONTHLY",
+      "situacao": "OPEN",
+      "valor": { "centavos": 75800, "formatado": "R$ 758,00" },
+      "competencia": { "de": "2026-03-09T…", "ate": "2026-04-09T…" },
+      "memoriaDeCalculo": {
+        "empresa": { "centavos": 59900, "formatado": "R$ 599,00" },
+        "patiosAdicionais": 1,
+        "porPatioAdicional": { "centavos": 15900, "formatado": "R$ 159,00" }
+      }
+    }
+  ]
+}
+```
+
+`memoriaDeCalculo` sai junto de propósito: a mensalidade é "R$ 599 mais R$ 159
+por pátio além do primeiro", e o lojista tem de conseguir conferir a conta sem
+pedir explicação a ninguém. Vem `null` na adesão, que é uma linha só.
+
+`tabela.congelada` é `true` só quando a tabela da empresa **difere** da vigente.
+Enquanto as duas coincidem, anunciar congelamento seria prometer um desconto que
+ainda não existe.
+
+`lojas` é contagem, nunca campo guardado — é a base de cálculo da mensalidade.
+
+### `POST /api/v1/financeiro/cobrancas/:id/pagamento`
+
+Registra o pagamento. Se isso derrubou o atraso abaixo de 30 dias, a empresa é
+reativada **na mesma operação** — separar deixaria uma janela em que ela pagou e
+continua suspensa, e essa janela sempre dura o tempo de alguém lembrar do
+segundo passo.
+
+```jsonc
+{ "cobranca": { "situacao": "PAID", … }, "empresaReativada": "mbr_prime" }
+```
+
+Cobrança de outra empresa responde **404**, não 403: dizer "existe, mas não é
+sua" já entrega que ela existe.
+
+Não há integração de meio de pagamento — este é o ponto por onde um adaptador
+real entra sem mexer no domínio.
 
 ---
 

@@ -13,7 +13,7 @@ import { buildApplication } from '../src/bootstrap.ts';
 import { loadConfig } from '../src/config.ts';
 import { FakeClock, DAY, HOUR, MINUTE, toIso } from '../src/domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../src/domain/shared/ids.ts';
-import { type Money, format as brl, fromReais } from '../src/domain/shared/money.ts';
+import { type Money, format as brl, fromCents, fromReais } from '../src/domain/shared/money.ts';
 
 /** Os numeros da vendedora sao anulaveis: ela pode nao registrar o preco. */
 const brlOpt = (value: Money | null): string => (value === null ? 'nao informado' : brl(value));
@@ -50,6 +50,7 @@ import { sealTerm, TransferPurpose, PhotoAngle } from '../src/domain/custody/cus
 import { VehicleAngle } from '../src/domain/vehicle/vehicle.ts';
 import { foundingWindowDaysLeft } from '../src/domain/cluster/cluster.ts';
 import { seededActor } from '../src/infra/seed.ts';
+import { memberStatement, runBillingSweep } from '../src/application/billing-service.ts';
 import { EvidenceType } from '../src/domain/lock/evidence.ts';
 import { RecallReason } from '../src/domain/recall/recall.ts';
 import { SettlementMethod, TradeInDestination } from '../src/domain/deal/deal.ts';
@@ -606,6 +607,42 @@ for (const fundadora of [lojaB, lojaC, lojaD]) {
 destaque(
   'Quem decide quem entra sao os membros: o terceiro endosso ja credencia, sem ' +
     'passo intermediario. A plataforma so opera.',
+);
+
+// ---------------------------------------------------------------------------
+ato('O que a rede fatura — e o que ela nao fatura');
+
+const faturamento = await runBillingSweep(context, seed.cluster.id);
+const extratoPrime = unwrap(await memberStatement(context, seed.stores[0]!.member.id));
+const adesaoPrime = extratoPrime.charges.find((c) => c.kind === 'ADHESION');
+const mensalPrime = extratoPrime.charges.find((c) => c.kind === 'MONTHLY');
+
+diz(`${extratoPrime.member.legalName} — ${extratoPrime.storeCount} patios na rede`);
+if (adesaoPrime !== undefined) {
+  diz(`  Adesao de fundadora: ${brl(adesaoPrime.amount)} (${adesaoPrime.status})`);
+}
+if (mensalPrime?.breakdown != null) {
+  diz(`  Mensalidade: ${brl(mensalPrime.amount)}`);
+  diz(`    ${brl(mensalPrime.breakdown.company)} pela empresa, primeiro patio incluso`);
+  diz(
+    `    ${brl(mensalPrime.breakdown.perExtraStore)} x ` +
+      `${mensalPrime.breakdown.extraStores} patio adicional`,
+  );
+}
+diz('');
+diz(
+  `Varredura da praca: ${faturamento.issued} mensalidades emitidas, ` +
+    `${brl(fromCents(faturamento.cents))} no ciclo.`,
+);
+
+destaque(
+  'ZERO taxa por transacao. Cobrar por repasse fechado criaria dois incentivos ' +
+    'ruins — combinar por fora e subdeclarar o valor. Cobrando so acesso, quem usa ' +
+    'mais nao paga mais por usar, e a receita so cresce se a rede crescer.',
+);
+destaque(
+  'Fundadora paga meia adesao e fica 24 meses na tabela que assinou — a tabela ' +
+    'INTEIRA, entao patio aberto no mes 10 tambem entra pelo preco congelado.',
 );
 
 // ---------------------------------------------------------------------------

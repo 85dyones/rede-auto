@@ -15,6 +15,7 @@ import {
 } from './membership.ts';
 import { StoreStatus, UserRole, parseStoreProfile } from './store.ts';
 import { MemberKind, MemberStatus, cnpjRootOf } from './member.ts';
+import { PILOT_TARIFF } from '../billing/tariff.ts';
 import { asApplicationId, asClusterId, asMemberId, asStoreId } from '../shared/ids.ts';
 import { unwrap } from '../shared/result.ts';
 import {
@@ -389,7 +390,7 @@ describe('retirada e credenciamento efetivo', () => {
   const NOVA_LOJA = asStoreId('str_new');
 
   const admitir = (cluster = PRACA) =>
-    admitApprovedMember(admitida(), NOVO_MBR, NOVA_LOJA, cluster, NOW);
+    admitApprovedMember(admitida(), NOVO_MBR, NOVA_LOJA, cluster, PILOT_TARIFF, NOW);
 
   test('so o padrinho retira a candidatura', () => {
     const application = pendingApplication();
@@ -414,6 +415,7 @@ describe('retirada e credenciamento efetivo', () => {
     assert.equal(member.status, MemberStatus.ACTIVE);
     assert.equal(member.sponsorMemberId, network.memberAt(0).id);
     assert.equal(member.cnpjRoot, cnpjRootOf('02558157000162'), 'a raiz vem do CNPJ da loja');
+    assert.equal(member.tariffVersion, PILOT_TARIFF.version, 'assina a tabela vigente na entrada');
 
     // O patio nasce junto e ja aponta para a empresa: uma loja orfa, mesmo que
     // por um instante, seria recusada por `resolveActor`.
@@ -447,7 +449,14 @@ describe('retirada e credenciamento efetivo', () => {
   });
 
   test('candidatura nao aprovada nao vira empresa', () => {
-    const result = admitApprovedMember(pendingApplication(), NOVO_MBR, NOVA_LOJA, PRACA, NOW);
+    const result = admitApprovedMember(
+      pendingApplication(),
+      NOVO_MBR,
+      NOVA_LOJA,
+      PRACA,
+      PILOT_TARIFF,
+      NOW,
+    );
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'APPLICATION_NOT_APPROVED');
   });
@@ -459,6 +468,7 @@ describe('retirada e credenciamento efetivo', () => {
       asMemberId('mbr_other'),
       asStoreId('str_other'),
       PRACA,
+      PILOT_TARIFF,
       NOW,
     );
     assert.equal(second.ok, false);

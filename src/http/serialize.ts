@@ -20,6 +20,8 @@ import {
 } from '../domain/cluster/cluster.ts';
 import type { Store } from '../domain/network/store.ts';
 import { type Member, formatCnpjRoot } from '../domain/network/member.ts';
+import type { Charge } from '../domain/billing/charge.ts';
+import type { BillingStatement } from '../application/billing-service.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
 import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
 import type { Vehicle } from '../domain/vehicle/vehicle.ts';
@@ -525,5 +527,49 @@ export function materialKitDto(kit: MaterialKit) {
                 : { centavos: kit.branding.price.cents, formatado: kit.branding.price.formatted },
           },
     geradoEm: sheet.generatedAt,
+  };
+}
+
+/**
+ * O extrato da empresa. `memoriaDeCalculo` sai junto de proposito: uma
+ * mensalidade e "R$ 599 mais R$ 159 por patio alem do primeiro", e o lojista
+ * tem de conseguir conferir a conta sem pedir explicacao a ninguem.
+ */
+export function chargeDto(charge: Charge) {
+  return {
+    id: charge.id,
+    especie: charge.kind,
+    situacao: charge.status,
+    valor: money(charge.amount),
+    tabela: charge.tariffVersion,
+    emitidaEm: instant(charge.issuedAt),
+    venceEm: instant(charge.dueAt),
+    pagaEm: instant(charge.paidAt),
+    competencia:
+      charge.kind === 'ADHESION'
+        ? null
+        : { de: instant(charge.periodStart), ate: instant(charge.periodEnd) },
+    memoriaDeCalculo:
+      charge.breakdown === null
+        ? null
+        : {
+            empresa: money(charge.breakdown.company),
+            patiosAdicionais: charge.breakdown.extraStores,
+            porPatioAdicional: money(charge.breakdown.perExtraStore),
+          },
+  };
+}
+
+export function statementDto(statement: BillingStatement) {
+  return {
+    empresa: memberDto(statement.member, statement.storeCount),
+    emAberto: money(statement.outstanding),
+    diasEmAtraso: statement.overdueDays,
+    proximaMensalidade: money(statement.nextMonthly),
+    tabela: {
+      versao: statement.tariffVersion,
+      congelada: statement.tariffFrozen,
+    },
+    cobrancas: statement.charges.map(chargeDto),
   };
 }

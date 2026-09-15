@@ -7,9 +7,13 @@
  */
 
 import { notFoundError } from '../../domain/shared/errors.ts';
-import { asApplicationId } from '../../domain/shared/ids.ts';
+import { asApplicationId, asChargeId } from '../../domain/shared/ids.ts';
 import type { AppContext } from '../../application/context.ts';
 import type { ApplicationView } from '../../application/governance-service.ts';
+import {
+  memberStatement,
+  registerChargePayment,
+} from '../../application/billing-service.ts';
 import {
   openStoreBranch,
   retireApplication,
@@ -19,7 +23,7 @@ import {
 } from '../../application/governance-service.ts';
 import type { Router } from '../router.ts';
 import { errorResponse, json } from '../http-types.ts';
-import { applicationDto, clusterDto, memberDto, storeDto } from '../serialize.ts';
+import { applicationDto, chargeDto, clusterDto, memberDto, statementDto, storeDto } from '../serialize.ts';
 import { asObject, optionalText } from '../parse.ts';
 import { requireActor } from './support.ts';
 
@@ -111,6 +115,50 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
       total: dtos.length,
       endossosParaCredenciar: context.policies.governance.requiredEndorsements,
       empresas: dtos,
+    });
+  });
+
+  /**
+   * O extrato da empresa do ator. Nao ha rota para ver o extrato de outra: o
+   * que uma loja paga nao e assunto da vizinha, mesmo dentro da praca.
+   */
+  router.get('/api/v1/financeiro', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const result = await memberStatement(context, actor.value.member.id);
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(200, statementDto(result.value));
+  });
+
+  /**
+   * Registra o pagamento de uma cobranca. Hoje o gesto e da propria empresa —
+   * nao ha integracao de meio de pagamento, e este e o ponto por onde um
+   * adaptador real entraria sem mexer no dominio.
+   */
+  router.post('/api/v1/financeiro/cobrancas/:id/pagamento', async (request) => {
+    const actor = requireActor(request);
+    if (!actor.ok) return errorResponse(actor.error, request.requestId);
+
+    const chargeId = asChargeId(request.params['id'] as string);
+    const charge = await context.repos.charges.byId(chargeId);
+
+    // 404, e nao 403, para cobranca de outra empresa: dizer "existe, mas nao e
+    // sua" ja entrega que ela existe.
+    if (charge === undefined || charge.memberId !== actor.value.member.id) {
+      return errorResponse(
+        notFoundError('CHARGE_NOT_FOUND', 'Cobranca nao encontrada.', { chargeId }),
+        request.requestId,
+      );
+    }
+
+    const result = await registerChargePayment(context, chargeId);
+    if (!result.ok) return errorResponse(result.error, request.requestId);
+
+    return json(200, {
+      cobranca: chargeDto(result.value.charge),
+      empresaReativada: result.value.reinstated === null ? null : result.value.reinstated.id,
     });
   });
 

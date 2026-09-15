@@ -34,6 +34,8 @@ import { type DomainError, validationError } from '../shared/errors.ts';
 import type { Instant } from '../shared/clock.ts';
 import type { ClusterId, MemberId } from '../shared/ids.ts';
 import { parseCnpj, requireText } from '../shared/validation.ts';
+import { domainEvent } from '../shared/events.ts';
+import { type Transition, transitioned, unchanged } from '../shared/transition.ts';
 import { parseEmail, parsePhone, type StoreProfile } from './store.ts';
 
 export const MemberKind = {
@@ -83,6 +85,14 @@ export type Member = {
   readonly joinedAt: Instant;
   /** Empresa que apresentou a candidatura. `null` para as fundadoras. */
   readonly sponsorMemberId: MemberId | null;
+  /**
+   * A versao da tabela de precos que esta empresa assinou.
+   *
+   * Fundadora fica nela por 24 meses (ver `tariff.ts`); depois migra para a
+   * vigente. Nao ha `frozenUntil` guardado ao lado: `joinedAt` mais 24 meses ja
+   * responde, e a copia so serviria para divergir do original.
+   */
+  readonly tariffVersion: string;
 };
 
 /** Os 8 primeiros digitos de um CNPJ ja validado. */
@@ -118,6 +128,7 @@ export function memberFromFirstStore(
   kind: MemberKind,
   sponsorMemberId: MemberId | null,
   joinedAt: Instant,
+  tariffVersion: string,
 ): Member {
   return {
     id,
@@ -131,6 +142,7 @@ export function memberFromFirstStore(
     status: MemberStatus.ACTIVE,
     joinedAt,
     sponsorMemberId,
+    tariffVersion,
   };
 }
 
@@ -187,4 +199,58 @@ export function memberInGoodStanding(member: Member): boolean {
 
 export function describeMember(member: Member): string {
   return `${member.legalName} (${formatCnpjRoot(member.cnpjRoot)})`;
+}
+
+// ---------------------------------------------------------------------------
+// Transicoes de contrato
+// ---------------------------------------------------------------------------
+
+/**
+ * Suspende por inadimplencia. Atinge a EMPRESA, e portanto todos os patios
+ * dela: o contrato e um so, e suspender uma filial de tres seria fingir que
+ * cada patio tem o proprio.
+ *
+ * O que a suspensao NAO faz, e de proposito:
+ *
+ *  - nao interrompe a custodia em curso. Carro de terceiro no patio da empresa
+ *    suspensa continua sendo responsabilidade dela, e continua podendo voltar
+ *    para a dona. Transformar o carro em refem de uma fatura puniria quem nao
+ *    deve nada;
+ *  - nao para a cobranca. O ciclo seguinte e emitido igual. Se parasse,
+ *    suspensao sairia mais barato que pagar, e a inadimplencia viraria uma
+ *    forma de ficar de graca.
+ */
+export function suspendForArrears(
+  member: Member,
+  overdueDays: number,
+  now: Instant,
+): Transition<Member> {
+  if (member.status === MemberStatus.EXITED) return unchanged(member);
+  if (member.status === MemberStatus.SUSPENDED) return unchanged(member);
+
+  return transitioned({ ...member, status: MemberStatus.SUSPENDED }, [
+    domainEvent('network.member_suspended', member.id, now, {
+      clusterId: member.clusterId,
+      legalName: member.legalName,
+      reason: 'ARREARS',
+      overdueDays,
+    }),
+  ]);
+}
+
+/**
+ * Reativa depois de quitado o atraso.
+ *
+ * Nao reativa quem saiu: `EXITED` e desligamento, e voltar exige credenciamento
+ * novo, com endossos. Uma quitacao nao desfaz uma saida.
+ */
+export function reinstate(member: Member, now: Instant): Transition<Member> {
+  if (member.status !== MemberStatus.SUSPENDED) return unchanged(member);
+
+  return transitioned({ ...member, status: MemberStatus.ACTIVE }, [
+    domainEvent('network.member_reinstated', member.id, now, {
+      clusterId: member.clusterId,
+      legalName: member.legalName,
+    }),
+  ]);
 }

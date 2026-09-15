@@ -25,6 +25,8 @@ import {
 import { domainEvent } from '../domain/shared/events.ts';
 import { type Store, UserRole, parseStoreProfile } from '../domain/network/store.ts';
 import { type Member, cnpjRootOf } from '../domain/network/member.ts';
+import { tariffInEffect } from '../domain/billing/tariff.ts';
+import { chargeAdhesion } from './billing-service.ts';
 import {
   MembershipStatus,
   type EndorsementTally,
@@ -168,12 +170,19 @@ async function admit(
   const cluster = await context.repos.clusters.byId(application.clusterId);
   if (cluster === undefined) return null;
 
+  // A tabela vigente AGORA: e ela que a empresa assina, e e ela que a
+  // fundadora leva congelada por 24 meses.
+  const now = context.clock.now();
+  const tariff = tariffInEffect(context.policies.tariffs, now);
+  if (tariff === undefined) return null;
+
   const result = admitApprovedMember(
     application,
     asMemberId(context.ids.next('mbr')),
     asStoreId(context.ids.next('str')),
     cluster,
-    context.clock.now(),
+    tariff,
+    now,
   );
   if (!result.ok) return null;
 
@@ -182,6 +191,12 @@ async function admit(
   await context.repos.members.save(result.value.member);
   await context.repos.stores.save(result.value.store);
   await context.repos.memberships.save(result.value.application);
+
+  // A adesao nasce com a empresa. Emitir aqui, e nao num passo separado, e o
+  // que garante que nao existe empresa credenciada sem adesao cobrada — e
+  // `chargeAdhesion` e idempotente, entao um provisionamento repetido depois de
+  // uma falha nao cobra duas vezes.
+  await chargeAdhesion(context, result.value.member);
   await publish(context, [
     domainEvent('network.member_admitted', result.value.member.id, context.clock.now(), {
       clusterId: result.value.member.clusterId,

@@ -24,7 +24,7 @@ se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 409 testes
+npm run check    # typecheck estrito + 475 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -130,7 +130,7 @@ O carro de troca tem dois destinos:
   A antes do fechamento**: sem isso, a Loja B daria um valor ao cliente sem
   saber se alguém o honra.
 
-## As quatro regras que sustentam a rede
+## As seis regras que sustentam a rede
 
 ### 1. Trava comercial com prazo de 4 horas
 
@@ -272,6 +272,77 @@ houve chance.
 > é o preço de montar a praça — mas é a razão de a janela ter teto de um ano.
 > Janela larga demais transforma a exceção em regra, e a adesão cheia nunca
 > entra.
+
+### 5. O que a rede cobra — e o que ela não cobra
+
+Duas receitas, e **nenhuma por transação**:
+
+| | Fundadora | Depois |
+|---|---|---|
+| Adesão (uma vez, não é caução) | R$ 3.000 | R$ 6.000 |
+| Mensalidade da empresa, 1ª loja inclusa | R$ 599 | R$ 599 |
+| Cada loja adicional | R$ 159 | R$ 159 |
+
+**Zero taxa por repasse, e isso é o desenho.** Cobrar por negócio fechado
+criaria exatamente dois incentivos ruins: combinar por fora e subdeclarar o
+valor. Cobrando só acesso, quem usa mais não paga mais por usar — o que é
+precisamente o comportamento que a plataforma precisa induzir — e a única forma
+de a receita crescer é a rede crescer.
+
+Cobrar por pátio adicional não é cobrar duas vezes pelo mesmo serviço: o volume
+da rede beneficia cada expositor, e cada pátio a mais é mais estoque a
+sincronizar, mais custódia a rastrear e mais gente na plataforma.
+
+**A tabela é versionada, com data de vigência.** Quem entra depois paga adesão
+maior — é o que premia quem entrou no começo. E sobe por ato de governança, não
+por fórmula: um reajuste automático aumentaria preço sem ninguém ter decidido
+aumentar, e a primeira notícia seria a fatura do lojista.
+
+**A fundadora fica 24 meses na tabela que assinou**, e congela a tabela
+*inteira*: pátio aberto no mês 10 entra pelo preço congelado. Congelar só a
+linha da empresa faria a fundadora descobrir o reajuste no momento em que
+decidisse crescer — que é o momento em que a rede quer que ela cresça.
+
+**Trinta dias de atraso suspendem a empresa**, e com ela todos os pátios: o
+contrato é um só. Duas coisas que a suspensão deliberadamente **não** faz:
+
+- não interrompe a custódia em curso. Carro de terceiro no pátio da empresa
+  suspensa continua podendo voltar para a dona — transformá-lo em refém de uma
+  fatura puniria quem não deve nada;
+- não para a cobrança. Se parasse, ficar suspenso sairia mais barato que pagar.
+
+A fatura emitida é **fato, não consulta**: valor e memória de cálculo ficam
+congelados. Recalcular na leitura faria um pátio aberto hoje mudar
+retroativamente uma fatura de três meses atrás. E o vencimento conta da
+emissão, não da competência — se a plataforma ficar sem faturar e recuperar
+quatro ciclos de uma vez, nenhum nasce vencido: ninguém fica inadimplente de um
+boleto que nunca recebeu.
+
+### 6. Empresa e loja são coisas diferentes
+
+A tabela acima só existe como preço se **empresa** e **loja** forem separadas, e
+por isso são:
+
+- a **empresa** (`Member`) paga, é fundadora, endossa e é suspensa;
+- a **loja** (`Store`) opera: custódia, estoque, trava, vistoria. Quem responde
+  pelo carro é quem está com ele, e isso não se reparte entre filiais.
+
+Daí **dois status**, não um: `Member.status` é contratual (inadimplência,
+saída), `Store.status` é operacional (quebra de protocolo de entrega ou
+retirada). `canTransact(store, member)` exige os dois de pé — unificar seria
+escolher entre punir pátio que não fez nada e deixar empresa inadimplente
+operando pela filial.
+
+A separação fecha um buraco que só aparece depois dela: **se o endosso fosse do
+pátio, um grupo com três lojas credenciaria uma candidata sozinho**, assinando
+de cada uma. O endosso é da empresa, exercido pelo titular de qualquer pátio
+dela, e endossar de novo atualiza a nota *por empresa*.
+
+A identidade da empresa é a **raiz do CNPJ** (8 dígitos), derivada do CNPJ da
+primeira loja — filial compartilha a raiz. Isso faz "essa loja é da mesma
+empresa?" ser pergunta verificável em vez de declaração em que se acredita, e é
+o que impede `POST /api/v1/lojas` de virar a porta dos fundos para credenciar
+uma empresa inteira pelo preço de uma filial.
 
 ## Material de divulgação
 

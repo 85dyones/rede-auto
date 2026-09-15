@@ -20,12 +20,21 @@ import {
   timeWindow,
 } from './domain/shared/business-hours.ts';
 import { MINUTE } from './domain/shared/clock.ts';
+import { DEFAULT_BILLING_POLICY, type BillingPolicy } from './domain/billing/charge.ts';
+import { DEFAULT_TARIFF_TABLES, type TariffTable } from './domain/billing/tariff.ts';
 
 export type NetworkPolicies = {
   readonly governance: GovernancePolicy;
   readonly lock: LockPolicy;
   readonly recall: RecallPolicy;
   readonly custody: CustodyPolicy;
+  readonly billing: BillingPolicy;
+  /**
+   * Tabelas de preco, todas as versoes. Uma lista, e nao a vigente, porque a
+   * fundadora fica na que assinou por 24 meses — a versao antiga precisa
+   * continuar existindo para poder ser cobrada.
+   */
+  readonly tariffs: readonly TariffTable[];
 };
 
 /**
@@ -57,6 +66,8 @@ export function defaultCalendar(referenceYear = new Date().getUTCFullYear()): Bu
 export function defaultPolicies(referenceYear?: number): NetworkPolicies {
   return {
     governance: DEFAULT_GOVERNANCE_POLICY,
+    billing: DEFAULT_BILLING_POLICY,
+    tariffs: DEFAULT_TARIFF_TABLES,
     lock: DEFAULT_LOCK_POLICY,
     recall: {
       slaBusinessHours: 4,

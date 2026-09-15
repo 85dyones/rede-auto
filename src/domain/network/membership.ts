@@ -61,6 +61,7 @@ import {
   memberInGoodStanding,
 } from './member.ts';
 import { type Cluster, requireSameCluster, withinFoundingWindow } from '../cluster/cluster.ts';
+import type { TariffTable } from '../billing/tariff.ts';
 
 export const MembershipStatus = {
   PENDING: 'PENDING',
@@ -492,6 +493,12 @@ export function admitApprovedMember(
   newMemberId: MemberId,
   newStoreId: StoreId,
   cluster: Cluster,
+  /**
+   * A tabela de precos vigente AGORA. Fica gravada no membro, e e ela que a
+   * fundadora leva congelada por 24 meses. Passar a tabela, e nao so a versao,
+   * faz o chamador provar que resolveu a vigencia antes de credenciar.
+   */
+  tariff: TariffTable,
   now: Instant,
 ): Result<
   { member: Member; store: Store; application: MembershipApplication },
@@ -530,6 +537,7 @@ export function admitApprovedMember(
     kind,
     application.sponsorMemberId,
     now,
+    tariff.version,
   );
 
   const store: Store = {

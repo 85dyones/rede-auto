@@ -82,3 +82,36 @@ export function formatDuration(milliseconds: number): string {
   if (minutes > 0 || parts.length === 0) parts.push(`${minutes}min`);
   return parts.join(' ');
 }
+
+/**
+ * Soma meses de calendario a um instante, em UTC.
+ *
+ * `+ 30 * DAY` nao serve: mensalidade tem competencia, e "todo dia 9" nao pode
+ * virar dia 8 depois de alguns ciclos. Fevereiro obriga a decidir o caso de
+ * borda — 31 de janeiro mais um mes. A escolha e GRUDAR NO ULTIMO DIA do mes
+ * alvo (28 de fevereiro), e nao transbordar para marco: transbordar faria a
+ * cobranca de quem assinou dia 31 pular de mes uma vez por ano.
+ */
+export function addMonths(instant: Instant, months: number): Instant {
+  const date = new Date(instant);
+  const targetMonth = date.getUTCMonth() + months;
+
+  // Dia 1 primeiro, para o mes nao transbordar antes de sabermos o teto dele.
+  const anchor = new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      targetMonth,
+      1,
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds(),
+    ),
+  );
+  const lastDayOfTarget = new Date(
+    Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+
+  anchor.setUTCDate(Math.min(date.getUTCDate(), lastDayOfTarget));
+  return anchor.getTime();
+}

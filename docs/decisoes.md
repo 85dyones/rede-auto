@@ -517,7 +517,104 @@ janela: larga demais, a exceção vira regra e a adesão cheia nunca entra.
 
 ---
 
-## 25. O que ficou de fora, e por quê
+## 25. Empresa e loja separadas, porque o preço as separou
+
+**Decisão.** Entra `Member` (a empresa contratante) acima de `Store`. O membro
+paga, é fundadora, endossa e é suspenso por inadimplência; a loja opera —
+custódia, estoque, trava, vistoria. Dois status independentes, e
+`canTransact(store, member)` exige os dois.
+
+**Por quê.** "R$ 599 por empresa, com a primeira loja inclusa, mais R$ 159 por
+loja adicional" não é um preço que se possa cobrar num modelo em que `Store` *é*
+a empresa. E, uma vez separadas, várias regras já escritas passavam a apontar
+para o lugar errado: a adesão é cobrada uma vez da empresa e não uma vez por
+pátio; inadimplência suspende a empresa e com ela todos os pátios, porque
+suspender uma filial de três seria fingir que cada pátio tem o próprio contrato.
+
+**O buraco que a separação abre, e que é a razão de ela ter de ser feita
+direito.** Se o endosso continuasse sendo do pátio, um grupo com três lojas
+credenciaria uma candidata sozinho, assinando de cada uma — e "três endossos"
+deixaria de significar três empresas respondendo por uma quarta para virar uma
+empresa respondendo por si mesma três vezes. É o mesmo buraco que
+`SPONSOR_CANNOT_ENDORSE` já fecha em outra porta.
+
+Então o endosso é da **empresa**, exercido pelo titular de qualquer pátio dela, e
+"endossar de novo atualiza a nota" passa a comparar por empresa. Vale registrar
+como isso foi verificado: a primeira versão dos testes **não** cobria o caso. Uma
+mutação — trocar `founderMemberId` por `givenByStoreId` na substituição — passou
+limpa, porque na rede de teste toda empresa tinha exatamente um pátio. Os três
+testes que existem hoje foram escritos para essa mutação falhar.
+
+**Consequência.**
+
+- `Member.status` é contratual, `Store.status` é operacional. Unificar seria
+  escolher entre punir pátio que não fez nada e deixar empresa inadimplente
+  operando pela filial.
+- `canTransact` ganhou o membro como parâmetro **obrigatório**. Opcional
+  deixaria metade das chamadas respondendo à pergunta antiga, e a metade errada
+  seria justamente a perigosa. Pelo mesmo motivo o membro entra em `Actor` e em
+  `OpenLockCommand` — o compilador apontou as chamadas.
+- A identidade da empresa é a **raiz do CNPJ**, derivada do CNPJ da primeira
+  loja. Filial compartilha a raiz e difere na ordem (`/0001`, `/0002`), então
+  "essa loja é da mesma empresa?" vira pergunta verificável.
+- `openBranch` abre pátio sem endosso — as fundadoras já responderam pela
+  empresa — mas exige raiz igual. Sem a guarda, "pátio adicional" seria a porta
+  dos fundos para credenciar uma empresa inteira pelo preço de uma filial.
+
+**Descartado.** Manter só `Store` e cobrar R$ 599 de cada loja. É mais simples e
+contraria o preço definido; além disso daria a um grupo de três lojas três
+endossos.
+
+---
+
+## 26. Receita por acesso, nunca por transação
+
+**Decisão.** Adesão (uma vez, versionada) e mensalidade (empresa + pátios
+adicionais). **Zero** taxa sobre repasse fechado.
+
+**Por quê.** A proposta inicial era uma taxa por transação, e ela está errada
+por dois motivos que se somam. Primeiro, cobrar por negócio fechado dá ao par de
+lojas um motivo para combinar por fora — e a plataforma existe justamente para
+que o processo inteiro aconteça dentro dela. Segundo, criaria incentivo a
+subdeclarar o valor, o que envenenaria os únicos números que a rede tem.
+
+Cobrando só acesso, quem usa mais não paga mais por usar. Isso é o oposto da
+intuição de monetização e é o comportamento correto aqui: o produto precisa que
+o volume suba. A receita cresce por membros, não por fricção.
+
+Há um custo aceito: a plataforma não captura valor proporcional ao volume que
+viabiliza. Numa rede pequena isso é irrelevante — o gargalo é adesão, não
+extração.
+
+**Consequência.**
+
+- A tabela é **versionada com data de vigência**, e sobe por ato de governança.
+  Um escalonador automático aumentaria preço sem ninguém ter decidido aumentar,
+  e a primeira notícia seria a fatura do lojista.
+- A adesão de fundadora é um **número próprio**, não "metade". Guardar uma
+  fração prenderia as duas linhas uma na outra para sempre.
+- O congelamento de 24 meses cobre a **tabela inteira**: pátio aberto no mês 10
+  entra pelo preço congelado. Congelar só a linha da empresa faria a fundadora
+  descobrir o reajuste no momento em que decidisse crescer.
+- A fatura congela valor **e** memória de cálculo. Recalcular na leitura faria
+  um pátio aberto hoje mudar uma fatura de três meses atrás.
+- Sem rateio: pátio aberto no meio do ciclo entra na fatura seguinte. O erro que
+  sobra cai a favor de quem está crescendo.
+- O ciclo é ancorado no **aniversário da adesão**, com `addMonths` de calendário
+  — `+ 30 * DAY` faria "todo dia 9" virar dia 8, depois 7.
+- O vencimento conta da **emissão**, não da competência: recuperar quatro ciclos
+  de uma vez não produz quatro faturas já vencidas. A falha de quem emite não
+  vira suspensão de quem paga.
+- Inadimplência é a cobrança aberta **mais atrasada**, nunca a soma dos atrasos.
+  Somar suspenderia em dez dias quem tem três faturas abertas do mesmo dia —
+  trinta dias é condição sobre tempo, não sobre volume.
+
+**Em aberto.** Serviços indiretos (laudo, transporte, seguro, antecipação) estão
+em stand-by por decisão de produto. Nada no desenho os impede depois.
+
+---
+
+## 27. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

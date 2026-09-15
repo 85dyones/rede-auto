@@ -136,6 +136,7 @@ export function buildMember(overrides: Partial<Member> = {}): Member {
     status: overrides.status ?? MemberStatus.ACTIVE,
     joinedAt: overrides.joinedAt ?? 0,
     sponsorMemberId: overrides.sponsorMemberId ?? null,
+    tariffVersion: overrides.tariffVersion ?? PILOT_TARIFF.version,
   };
 }
 
@@ -229,7 +230,15 @@ export function buildFoundingNetwork(count = 6): FoundingNetwork {
     });
 
     members.push(
-      memberFromFirstStore(memberId, TEST_CLUSTER_ID, profile, MemberKind.FOUNDER, null, 0),
+      memberFromFirstStore(
+        memberId,
+        TEST_CLUSTER_ID,
+        profile,
+        MemberKind.FOUNDER,
+        null,
+        0,
+        PILOT_TARIFF.version,
+      ),
     );
     founders.push({
       id: storeId,
@@ -299,6 +308,7 @@ import {
 import { asVehicleId, type VehicleId } from '../domain/shared/ids.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import { DAY } from '../domain/shared/clock.ts';
+import { PILOT_TARIFF } from '../domain/billing/tariff.ts';
 
 export function buildSpecs(overrides: Partial<VehicleSpecs> = {}): VehicleSpecs {
   return {

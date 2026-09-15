@@ -13,6 +13,7 @@ import type {
   ClusterId,
   CustodyTransferId,
   DealId,
+  ChargeId,
   LockId,
   MemberId,
   RecallId,
@@ -25,6 +26,7 @@ import type { DomainEvent } from '../../domain/shared/events.ts';
 import type { Cluster } from '../../domain/cluster/cluster.ts';
 import type { NetworkUser, Store } from '../../domain/network/store.ts';
 import type { Member } from '../../domain/network/member.ts';
+import type { Charge } from '../../domain/billing/charge.ts';
 import type { MembershipApplication } from '../../domain/network/membership.ts';
 import type { Vehicle } from '../../domain/vehicle/vehicle.ts';
 import { CommercialStatus } from '../../domain/vehicle/vehicle.ts';
@@ -58,6 +60,14 @@ export type MemberRepository = {
    * existem depende de quem entrou antes de a janela de fundacao fechar.
    */
   founders(clusterId: ClusterId): Promise<Member[]>;
+};
+
+export type ChargeRepository = {
+  save(charge: Charge): Promise<void>;
+  byId(id: ChargeId): Promise<Charge | undefined>;
+  byMember(memberId: MemberId): Promise<Charge[]>;
+  /** Todas as cobrancas em aberto da praca. Base do varredor de inadimplencia. */
+  outstandingInCluster(clusterId: ClusterId): Promise<Charge[]>;
 };
 
 export type StoreRepository = {
@@ -180,6 +190,7 @@ export type NotificationRepository = {
 export type Repositories = {
   readonly clusters: ClusterRepository;
   readonly members: MemberRepository;
+  readonly charges: ChargeRepository;
   readonly stores: StoreRepository;
   readonly users: UserRepository;
   readonly memberships: MembershipRepository;
@@ -245,6 +256,29 @@ class InMemoryStoreRepository implements StoreRepository {
   }
   async byMember(memberId: MemberId): Promise<Store[]> {
     return [...this.#byId.values()].filter((store) => store.memberId === memberId).map(clone);
+  }
+}
+
+class InMemoryChargeRepository implements ChargeRepository {
+  readonly #byId = new Map<string, Charge>();
+
+  async save(charge: Charge): Promise<void> {
+    this.#byId.set(charge.id, clone(charge));
+  }
+  async byId(id: ChargeId): Promise<Charge | undefined> {
+    const found = this.#byId.get(id);
+    return found === undefined ? undefined : clone(found);
+  }
+  async byMember(memberId: MemberId): Promise<Charge[]> {
+    return [...this.#byId.values()]
+      .filter((charge) => charge.memberId === memberId)
+      .sort((a, b) => a.issuedAt - b.issuedAt)
+      .map(clone);
+  }
+  async outstandingInCluster(clusterId: ClusterId): Promise<Charge[]> {
+    return [...this.#byId.values()]
+      .filter((charge) => charge.clusterId === clusterId && charge.status === 'OPEN')
+      .map(clone);
   }
 }
 
@@ -550,6 +584,7 @@ export function createInMemoryRepositories(): Repositories {
   return {
     clusters: new InMemoryClusterRepository(),
     members: new InMemoryMemberRepository(),
+    charges: new InMemoryChargeRepository(),
     stores: new InMemoryStoreRepository(),
     users: new InMemoryUserRepository(),
     memberships: new InMemoryMembershipRepository(),

@@ -22,9 +22,16 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Loja A / loja proprietária | `ownerStoreId` | dona do veículo. Fixa o preço líquido, emite o ATPV-e. A titularidade nunca muda de mão entre lojistas. |
 | Loja B / loja vendedora | `sellingStoreId` | assume o cliente final por inteiro: atendimento, financiamento, carro de troca e a garantia legal do CDC. |
 | Loja custodiante | `custodianStoreId` | quem está com o carro no pátio agora, e responde por multa, avaria e sinistro. Pode ser qualquer uma das duas. |
-| Loja fundadora | `StoreKind.FOUNDER` | credenciada **dentro da janela de fundação** da praça. Única que endossa — e só no próprio cluster (`isFounderOf`). Quantas existem se conta, não se declara. |
-| Loja membro | `StoreKind.MEMBER` | credenciada depois de fechada a janela. Opera igual, mas não endossa. |
-| Padrinho | `sponsorStoreId` | loja que apresentou a candidatura. Não endossa a própria indicação. |
+| Empresa / membro | `Member` | a contratante. Paga, é fundadora, endossa e é suspensa por inadimplência. Identificada pela raiz do CNPJ. |
+| Loja / pátio | `Store` | onde o carro fica. Custódia, estoque, trava, vistoria. Pertence a uma empresa (`memberId`). |
+| Raiz do CNPJ | `cnpjRoot` | os 8 primeiros dígitos. Filial compartilha a raiz e difere na ordem — é o que torna "mesma empresa?" verificável. |
+| Adesão | `ChargeKind.ADHESION` | R$ 6.000, metade para fundadora. Uma vez por empresa, não é caução, não volta. |
+| Mensalidade | `ChargeKind.MONTHLY` | R$ 599 por empresa com a 1ª loja inclusa + R$ 159 por loja adicional. Sem taxa por transação. |
+| Congelamento | `FOUNDER_FREEZE_MONTHS` | 24 meses em que a fundadora fica na tabela que assinou — a tabela inteira, inclusive a linha do pátio adicional. |
+| Inadimplência | `isDelinquent` | 30 dias na cobrança aberta mais atrasada (nunca a soma). Suspende a empresa e, com ela, todos os pátios. |
+| Empresa fundadora | `MemberKind.FOUNDER` | credenciada **dentro da janela de fundação**. Única que endossa, e só na própria praça (`isFoundingMemberOf`). Quantas existem se conta, não se declara. |
+| Empresa membro | `MemberKind.MEMBER` | credenciada depois de fechada a janela. Opera igual, mas não endossa. |
+| Padrinho | `sponsorMemberId` | empresa que apresentou a candidatura. Não endossa a própria indicação, nem pela filial. |
 | Titular | `UserRole.PRINCIPAL` | quem endossa credenciamento, além de tudo que o gerente faz. |
 | Gerente | `UserRole.MANAGER` | preço líquido, aceite de transbordo, recall, assinatura de custódia. |
 | Vendedor | `UserRole.SALESPERSON` | abre e estende travas, monta negociação, baixa material. |
