@@ -16,7 +16,7 @@ usuário)** — o papel do usuário decide o que ele pode fazer.
 plataforma, e não há superfície voltada a ele.
 
 > A autenticação por chave é adaptador de **desenvolvimento**. Ver a ressalva em
-> [`decisoes.md`](decisoes.md#24-o-que-ficou-de-fora-e-por-quê).
+> [`decisoes.md`](decisoes.md#25-o-que-ficou-de-fora-e-por-quê).
 
 Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 `demo_prime_titular`, `demo_veloz_vendedor`, e assim por diante.
@@ -64,7 +64,7 @@ líquido de um concorrente de outra cidade. Um veículo de outra praça responde
 | 403 | autenticado, mas sem permissão para este recurso |
 | 404 | recurso inexistente |
 | 409 | a ação contradiz o estado atual (ex.: já travado) |
-| 422 | regra de negócio violada (cota de evidência, teto da trava, quórum) |
+| 422 | regra de negócio violada (cota de evidência, teto da trava, endosso) |
 
 O `codigo` é contrato estável — trate por ele, não pela mensagem. O `requestId`
 aparece em toda resposta e no log do servidor.
@@ -87,7 +87,12 @@ A praça em que a loja autenticada opera.
     "municipios": ["Curitiba", "Sao Jose dos Pinhais", "Colombo", "…"],
     "raioOperacionalKm": 60,
     "situacao": "ACTIVE",
-    "constituidoEm": "2026-03-09T12:00:00.000Z"
+    "constituidoEm": "2026-03-09T12:00:00.000Z",
+    "janelaDeFundacao": {
+      "terminaEm": "2026-06-07T12:00:00.000Z",
+      "aberta": true,
+      "diasRestantes": 90
+    }
   }
 }
 ```
@@ -97,11 +102,21 @@ para a tela explicar o alcance da rede e para a governança julgar candidatura
 ("essa loja fica a 180 km, o recall de 4h vai falhar toda vez"). O cadastro
 recusa acima de 300 km.
 
+`janelaDeFundacao` é a regra comercial em forma de data. Enquanto `aberta`, toda
+loja credenciada nasce **fundadora** e paga meia adesão; depois, entra como
+membro pela adesão cheia. `diasRestantes` existe para a tela poder dizer isso a
+quem está decidindo — é argumento de venda, e o número já vem arredondado para
+cima (meio dia restante ainda é um dia).
+
 ### `GET /api/v1/lojas` · `GET /api/v1/lojas/fundadoras`
 
 Lojas **da sua praça** — não existe "todas as lojas da instalação". A segunda
-traz também `endossosRecomendados`, e lista apenas as fundadoras do seu cluster:
-o endosso é contado dentro de uma praça só.
+lista apenas as fundadoras do seu cluster (o endosso é contado dentro de uma
+praça só) e traz `endossosParaCredenciar`.
+
+O `total` dessa rota é uma **contagem**, nunca um número de política: quantas
+fundadoras a praça tem depende de quem foi credenciado antes de a janela de
+fundação fechar, e isso varia por praça.
 
 ### `POST /api/v1/credenciamentos`
 
@@ -122,18 +137,51 @@ Apresenta uma candidata. Quem chama vira o padrinho.
 ```
 
 CNPJ, UF, telefone e e-mail são validados na candidatura, não na aprovação —
-fundador não deve gastar voto analisando ficha incompleta. Se houver mais de um
-campo inválido, o erro principal traz os demais em `detalhes.outrosErros`.
+fundadora não deve gastar endosso analisando ficha incompleta. Se houver mais de
+um campo inválido, o erro principal traz os demais em `detalhes.outrosErros`.
 
-### `POST /api/v1/credenciamentos/:id/votos`
+A resposta já traz a apuração:
 
 ```jsonc
-{ "decisao": "APPROVE", "justificativa": "Conheço a operação há 6 anos." }
+{
+  "apuracao": {
+    "endossos": 0,
+    "necessarios": 3,
+    "faltam": 3,
+    "credenciada": false,
+    "fundadorasQuePodemEndossar": 9,   // contadas, não declaradas
+    "alcancavel": true
+  }
+}
 ```
 
-Só o **titular** de fundadora ativa vota; o padrinho não vota na própria
-indicação. O terceiro aval já credencia — a resposta traz `lojaCredenciada`
-preenchida. Quatro votos contrários reprovam.
+`fundadorasQuePodemEndossar` exclui quem já endossou, quem está suspensa e a
+própria padrinho — é quem **pode**, não quem existe. `alcancavel` é `false`
+quando não sobram fundadoras suficientes para fechar os três endossos; sem esse
+campo, a única notícia seria a caducidade em 30 dias, sem ninguém saber que nunca
+houve chance.
+
+### `POST /api/v1/credenciamentos/:id/endossos`
+
+```jsonc
+{ "justificativa": "Conheço a operação há 6 anos." }
+```
+
+Não há corpo de decisão, e isso é proposital: **não existe endosso contrário**.
+Quem tem restrição simplesmente não endossa. Modelar rejeição daria a cada
+fundadora um veto individual sobre concorrência direta.
+
+Só o **titular** de fundadora ativa endossa, e a padrinho não endossa a própria
+indicação. O terceiro endosso já credencia — a resposta traz `lojaCredenciada`
+preenchida, e o `tipo` dela depende da janela de fundação da praça: `FOUNDER`
+dentro da janela, `MEMBER` depois.
+
+Endossar de novo **atualiza a nota** em vez de somar: sem isso, uma fundadora
+credenciaria sozinha endossando três vezes.
+
+### `DELETE /api/v1/credenciamentos/:id`
+
+Retira a candidatura. Só a padrinho pode.
 
 ---
 
@@ -795,7 +843,7 @@ necessário para a correção do estado**.
 | `HOST` | `0.0.0.0` | interface |
 | `SWEEP_INTERVAL_MS` | `60000` | intervalo do varredor |
 | `MAX_BODY_BYTES` | `41943040` | teto do corpo (feeds grandes) |
-| `SEED_DEMO_DATA` | `true` | semeia as 6 fundadoras e o estoque de exemplo |
+| `SEED_DEMO_DATA` | `true` | semeia as fundadoras do piloto e o estoque de exemplo |
 
 As políticas de negócio (4h de trava, 4h úteis de SLA, endossos recomendados,
 tolerâncias de vistoria) ficam em `src/config.ts`, não em variável de ambiente:

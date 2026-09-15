@@ -894,10 +894,34 @@ describe('credenciamento: quem decide quem entra sao os membros', () => {
     });
 
     assert.equal(response.body.situacao, 'APPROVED');
-    assert.equal(response.body.lojaCredenciada.tipo, 'MEMBER', 'quem entra depois nao vira fundadora');
+    // FUNDADORA, e nao membro: a janela de fundacao do piloto esta aberta, e
+    // quem entrar na janela leva. Fechada a janela, a mesma candidatura com os
+    // mesmos endossos viraria MEMBER — e o que `services.test.ts` cobre, porque
+    // exige avancar o relogio em 90 dias sem arrastar o resto desta suite.
+    assert.equal(response.body.lojaCredenciada.tipo, 'FOUNDER');
 
     const stores = await api<{ total: number }>('GET', '/api/v1/lojas', { key: PRIME });
-    assert.equal(stores.body.total, 11, '10 fundadoras + a credenciada');
+    assert.equal(stores.body.total, 11, '10 fundadoras do seed + a credenciada');
+  });
+
+  test('a apuracao conta as fundadoras da praca — inclusive a que acabou de entrar', async () => {
+    const response = await api<{
+      apuracao: { fundadorasQuePodemEndossar: number; alcancavel: boolean };
+    }>('GET', `/api/v1/credenciamentos/${applicationId}`, { key: PRIME });
+
+    // 11 fundadoras agora (10 do seed + a credenciada), menos a padrinho, menos
+    // as tres que ja endossaram.
+    assert.equal(response.body.apuracao.fundadorasQuePodemEndossar, 7);
+    assert.equal(response.body.apuracao.alcancavel, true);
+  });
+
+  test('a praca publica a janela de fundacao', async () => {
+    const response = await api<{
+      cluster: { janelaDeFundacao: { aberta: boolean; diasRestantes: number } };
+    }>('GET', '/api/v1/cluster', { key: PRIME });
+
+    assert.equal(response.body.cluster.janelaDeFundacao.aberta, true);
+    assert.ok(response.body.cluster.janelaDeFundacao.diasRestantes > 0);
   });
 });
 

@@ -8,8 +8,10 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Termo | No código | O que é |
 |---|---|---|
 | Praça / cluster | `Cluster` | a rede local. Estoque, custódia, travas, negociação e governança não atravessam a fronteira. |
-| Praça do piloto | `curitiba-rmc` | Curitiba e Região: 10 municípios, raio operacional declarado de 60 km, 6 fundadoras. |
+| Praça do piloto | `curitiba-rmc` | Curitiba e Região: 10 municípios, raio operacional declarado de 60 km, 10 fundadoras no seed. |
 | Raio operacional | `operatingRadiusKm` | alcance declarado da praça. Não bloqueia nada — informa a governança e explica por que a rede é local. |
+| Alcançável | `EndorsementTally.reachable` | se ainda sobram fundadoras suficientes para fechar os três endossos. `false` avisa na abertura o que, sem ele, só apareceria como caducidade 30 dias depois. |
+| Janela de fundação | `foundingWindowEndsAt` | prazo em que uma loja credenciada ainda nasce fundadora (meia adesão). 90 dias por padrão, teto de um ano. Quem entrar na janela, leva. |
 | Teto de raio | `MAX_OPERATING_RADIUS_KM` | 300 km. Acima disso ida e volta não cabem no dia útil e o SLA de recall deixa de ser cumprível. |
 | Fronteira | `requireSameCluster` | a guarda única. Veículo de outra praça responde 404; alvo já identificado por outra via, 403. |
 
@@ -20,10 +22,10 @@ inglês na estrutura e português nos termos que não têm tradução útil.
 | Loja A / loja proprietária | `ownerStoreId` | dona do veículo. Fixa o preço líquido, emite o ATPV-e. A titularidade nunca muda de mão entre lojistas. |
 | Loja B / loja vendedora | `sellingStoreId` | assume o cliente final por inteiro: atendimento, financiamento, carro de troca e a garantia legal do CDC. |
 | Loja custodiante | `custodianStoreId` | quem está com o carro no pátio agora, e responde por multa, avaria e sinistro. Pode ser qualquer uma das duas. |
-| Loja fundadora | `StoreKind.FOUNDER` | uma das 6 constituintes **da praça**. Única com direito a voto no credenciamento — e só dentro do próprio cluster (`isFounderOf`). |
-| Loja membro | `StoreKind.MEMBER` | credenciada depois, por aval dos fundadores. Opera igual, mas não vota. |
-| Padrinho | `sponsorStoreId` | loja que apresentou a candidatura. Não vota na própria indicação. |
-| Titular | `UserRole.PRINCIPAL` | quem vota credenciamento, além de tudo que o gerente faz. |
+| Loja fundadora | `StoreKind.FOUNDER` | credenciada **dentro da janela de fundação** da praça. Única que endossa — e só no próprio cluster (`isFounderOf`). Quantas existem se conta, não se declara. |
+| Loja membro | `StoreKind.MEMBER` | credenciada depois de fechada a janela. Opera igual, mas não endossa. |
+| Padrinho | `sponsorStoreId` | loja que apresentou a candidatura. Não endossa a própria indicação. |
+| Titular | `UserRole.PRINCIPAL` | quem endossa credenciamento, além de tudo que o gerente faz. |
 | Gerente | `UserRole.MANAGER` | preço líquido, aceite de transbordo, recall, assinatura de custódia. |
 | Vendedor | `UserRole.SALESPERSON` | abre e estende travas, monta negociação, baixa material. |
 

@@ -25,7 +25,24 @@ export type RouteMatch = {
 export class Router {
   readonly #routes: Route[] = [];
 
+  /**
+   * Registrar a MESMA rota duas vezes e erro de programacao, nao configuracao:
+   * a primeira vence e a segunda fica inalcancavel, enquanto quem a escreveu
+   * acha que ela responde. Aconteceu aqui — um bloco de rotas de credenciamento
+   * sobreviveu a uma reescrita de governanca e ficou no arquivo com o
+   * comportamento antigo, sem nunca ser servido e sem nada acusar.
+   *
+   * `throw` e nao `Result`: isso e bug de montagem, descoberto no boot, e nao
+   * ha o que tratar em runtime. A comparacao e por padrao literal, entao ela
+   * pega a copia-e-cola, que e o caso real — nao dois padroes diferentes que
+   * casam com o mesmo caminho.
+   */
   add(method: HttpMethod, pattern: string, handler: Handler, options: { public?: boolean } = {}): this {
+    const ja = this.#routes.find((route) => route.method === method && route.pattern === pattern);
+    if (ja !== undefined) {
+      throw new Error(`Rota duplicada: ${method} ${pattern} ja esta registrada.`);
+    }
+
     this.#routes.push({
       method,
       pattern,

@@ -1,7 +1,7 @@
 # Handoff de frontend — rede-auto
 
 **Para:** Claude Design · **De:** time de backend · **Status:** API implementada e
-testada (366 testes), frontend inexistente.
+testada (409 testes), frontend inexistente.
 
 Este documento é o briefing para a proposta visual. Tudo aqui está ancorado no
 contrato real da API — os JSON citados são respostas de verdade, capturadas do
@@ -16,7 +16,7 @@ completo), [`glossario.md`](glossario.md) (vocabulário).
 
 ## 1. O produto, em um minuto
 
-Rede **fechada e local** de 6 lojas fundadoras de seminovos que compartilham
+Rede **fechada e local** de lojas fundadoras de seminovos que compartilham
 estoque entre si. Quando a Loja B tem um cliente para um carro que está na Loja
 A, hoje isso se resolve no WhatsApp: negocia margem, confirma disponibilidade,
 combina o frete. É moroso, e a lentidão mata a venda. A plataforma substitui
@@ -532,10 +532,28 @@ as coisas por telefone.
 **Sincronização de feed** (`/feeds/sincronizacao`) — relatório com criados,
 atualizados, ausentes (com ação tomada) e recusados com motivo legível; é uma
 tela de diagnóstico, precisa dizer o que fazer com cada recusa.
-**Credenciamento** (`/credenciamentos`) — fundadoras **endossam**, a plataforma
-decide. Não há voto contrário: quem tem restrição não endossa. A tela mostra os
-endossos, quantos faltam para o recomendado, e — quando houver — a justificativa
-da plataforma por ter admitido abaixo dele.
+**Credenciamento** (`/credenciamentos`) — três endossos de fundadoras
+credenciam, e o terceiro já admite: a plataforma não decide nada aqui. Não há
+voto contrário — quem tem restrição simplesmente não endossa, então **não
+desenhe botão de recusar**. A tela mostra os endossos dados, quantos faltam, e
+duas coisas que a API entrega prontas:
+
+- `apuracao.fundadorasQuePodemEndossar` — quem ainda **pode** endossar (exclui as
+  suspensas, as que já endossaram e a padrinho). É contagem real, não um total
+  fixo da rede;
+- `apuracao.alcancavel` — quando `false`, não há fundadoras suficientes para
+  fechar os três endossos e a candidatura não tem como ser aprovada. A tela
+  precisa dizer isso **na abertura**, não deixar a candidata descobrir pela
+  caducidade em 30 dias.
+
+A candidatura caduca em 30 dias, e o prazo é informação de tela: é o único
+desfecho negativo que existe.
+
+**Janela de fundação.** `GET /api/v1/cluster` traz `janelaDeFundacao` com
+`aberta` e `diasRestantes`. Enquanto aberta, quem for credenciado entra como
+**fundadora** (meia adesão); depois, como membro. Isso é argumento comercial com
+prazo visível — merece destaque na tela de credenciamento e no convite, não uma
+linha de rodapé.
 
 ---
 
@@ -545,9 +563,15 @@ Não use lorem ipsum. Estes são os dados semeados pela aplicação:
 
 **Praça:** Curitiba e Região (PR) · 10 municípios · raio operacional 60 km
 
-**Lojas fundadoras:** Prime Motors (Curitiba/PR) · Veloz Seminovos (São José dos
-Pinhais/PR) · Garagem Central (Curitiba/PR) · Norte Automóveis (Colombo/PR) ·
-Sul Car (Araucária/PR) · Via Livre Veículos (Pinhais/PR)
+**Lojas fundadoras (10):** Prime Motors (Curitiba/PR) · Veloz Seminovos (São
+José dos Pinhais/PR) · Garagem Central (Curitiba/PR) · Norte Automóveis
+(Colombo/PR) · Sul Car (Araucária/PR) · Via Livre Veículos (Pinhais/PR) ·
+Planalto Veículos (Campo Largo/PR) · Atlas Automóveis (Curitiba/PR) · Iguaçu
+Motors (Piraquara/PR) · Bandeirante Seminovos (Fazenda Rio Grande/PR)
+
+São dez porque dez é o alvo do piloto, **não** porque dez seja exigido: a praça
+abre com quem entrou na janela de fundação. Nenhuma tela deve exibir "x de 10" —
+o denominador vem contado da API.
 
 Todas dentro do raio — e é por isso que "a Loja B vai buscar o carro hoje à
 tarde" é uma frase que cabe na tela.
@@ -641,7 +665,7 @@ Coisas que parecem boas ideias e quebram o produto:
 | Um único badge de status por veículo | mente sobre os dois eixos (seção 3) |
 | Preço líquido em qualquer superfície voltada ao consumidor | destrói o modelo da rede |
 | Contador regressivo cru para o SLA | ignora horas úteis (P6) |
-| Avaliação/rating entre lojas | governança aqui é o quórum de fundadores, não reputação social |
+| Avaliação/rating entre lojas | governança aqui é endosso de fundadoras, não reputação social |
 | Notificação para toda trava aberta | afogaria os avisos que exigem ação |
 
 ---

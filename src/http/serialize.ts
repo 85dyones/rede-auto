@@ -13,7 +13,11 @@
 import { formatDuration, toIso, type Instant } from '../domain/shared/clock.ts';
 import type { StoreId } from '../domain/shared/ids.ts';
 import { type Money, format as formatMoney } from '../domain/shared/money.ts';
-import type { Cluster } from '../domain/cluster/cluster.ts';
+import {
+  type Cluster,
+  foundingWindowDaysLeft,
+  withinFoundingWindow,
+} from '../domain/cluster/cluster.ts';
 import type { Store } from '../domain/network/store.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
 import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
@@ -36,7 +40,7 @@ export const instant = (value: Instant | null): string | null =>
   value === null ? null : toIso(value);
 
 /** A praca: o alcance declarado que torna o SLA de 4 horas honesto. */
-export function clusterDto(cluster: Cluster) {
+export function clusterDto(cluster: Cluster, now: Instant) {
   return {
     id: cluster.id,
     nome: cluster.name,
@@ -46,6 +50,11 @@ export function clusterDto(cluster: Cluster) {
     raioOperacionalKm: cluster.operatingRadiusKm,
     situacao: cluster.status,
     constituidoEm: instant(cluster.foundedAt),
+    janelaDeFundacao: {
+      terminaEm: instant(cluster.foundingWindowEndsAt),
+      aberta: withinFoundingWindow(cluster, now),
+      diasRestantes: foundingWindowDaysLeft(cluster, now),
+    },
   };
 }
 
@@ -385,6 +394,9 @@ export function applicationDto(application: MembershipApplication, tally: Endors
       faltam: tally.stillNeeded,
       credenciada: tally.credentialed,
       fundadorasQuePodemEndossar: tally.foundersYetToEndorse,
+      // Falso quando nao sobram fundadoras suficientes para fechar a conta. A
+      // padrinho precisa saber disso agora, nao pela caducidade em 30 dias.
+      alcancavel: tally.reachable,
     },
     endossos: application.endorsements.map((e) => ({
       fundadoraId: e.founderStoreId,

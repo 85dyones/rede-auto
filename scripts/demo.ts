@@ -48,6 +48,7 @@ import { syncStoreFeed } from '../src/application/feed-service.ts';
 import { downloadMaterial, publishMaterial } from '../src/application/material-service.ts';
 import { sealTerm, TransferPurpose, PhotoAngle } from '../src/domain/custody/custody.ts';
 import { VehicleAngle } from '../src/domain/vehicle/vehicle.ts';
+import { foundingWindowDaysLeft } from '../src/domain/cluster/cluster.ts';
 import { EvidenceType } from '../src/domain/lock/evidence.ts';
 import { RecallReason } from '../src/domain/recall/recall.ts';
 import { SettlementMethod, TradeInDestination } from '../src/domain/deal/deal.ts';
@@ -167,7 +168,7 @@ console.log(`  Relogio simulado. Inicio: ${relogio()}`);
 console.log('=============================================================');
 
 // ---------------------------------------------------------------------------
-ato('A praca do piloto e as 6 lojas fundadoras');
+ato('A praca do piloto e as lojas fundadoras');
 
 diz(`Cluster: ${seed.cluster.name} (${seed.cluster.state}) — raio operacional de ${seed.cluster.operatingRadiusKm} km`);
 diz(`Municipios atendidos: ${seed.cluster.cities.length}`);
@@ -177,7 +178,12 @@ for (const seeded of seed.stores) {
 }
 destaque(
   `Credenciar loja nova exige ${context.policies.governance.requiredEndorsements} endossos entre ` +
-    `${context.policies.governance.founderCount} fundadoras.`,
+    `as ${seed.stores.length} fundadoras — contadas, nao declaradas. O numero e flexivel: a praca ` +
+    'abre com quem entrou na janela de fundacao.',
+);
+destaque(
+  `Janela de fundacao aberta por mais ${foundingWindowDaysLeft(seed.cluster, context.clock.now())} ` +
+    'dias. Quem for credenciado ate la entra como fundadora e paga meia adesao; depois, como membro.',
 );
 destaque(
   'A rede e local, e isso nao e detalhe de lancamento: o SLA de 4 horas uteis so e ' +

@@ -2,9 +2,13 @@
  * Loja participante da rede e seus usuarios.
  *
  * A rede e fechada e qualificada: nao existe autocadastro. Uma loja so passa a
- * existir como membro depois de aprovada pelo quorum de fundadores
- * (ver `membership.ts`). As 6 lojas fundadoras sao criadas na constituicao da
- * rede e sao as unicas com direito a voto.
+ * existir como membro depois de endossada por fundadoras da praca (ver
+ * `membership.ts`).
+ *
+ * Quem e fundadora nao e uma lista fechada na constituicao: e quem foi
+ * credenciado enquanto a janela de fundacao do cluster estava aberta. Por isso
+ * nenhum lugar do sistema declara quantas fundadoras existem — pergunta-se ao
+ * repositorio (`stores.founders(clusterId)`).
  */
 
 import { type Result, ok, err, combine } from '../shared/result.ts';
@@ -15,9 +19,12 @@ import { parseCnpj, requireText, requireOneOf } from '../shared/validation.ts';
 import { TradeInStance } from '../vehicle/vehicle.ts';
 
 export const StoreKind = {
-  /** Uma das 6 lojas constituintes. Tem direito a voto no credenciamento. */
+  /**
+   * Entrou dentro da janela de fundacao da praca. Endossa candidaturas e paga
+   * adesao reduzida. Quantas existem e um fato contado, nao um numero fixado.
+   */
   FOUNDER: 'FOUNDER',
-  /** Loja credenciada depois, por aval dos fundadores. Sem direito a voto. */
+  /** Credenciada depois de fechada a janela. Opera igual; nao endossa. */
   MEMBER: 'MEMBER',
 } as const;
 export type StoreKind = (typeof StoreKind)[keyof typeof StoreKind];
@@ -35,7 +42,7 @@ export const UserRole = {
   SALESPERSON: 'SALESPERSON',
   /** Tudo do vendedor + preco liquido, aceite de transbordo, recall, custodia. */
   MANAGER: 'MANAGER',
-  /** Tudo do gerente + voto de credenciamento (apenas em loja fundadora). */
+  /** Tudo do gerente + endosso de credenciamento (apenas em loja fundadora). */
   PRINCIPAL: 'PRINCIPAL',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -90,7 +97,7 @@ export type NetworkUser = {
 
 /**
  * Valida o cadastro de uma candidata. Roda no momento da candidatura, nao na
- * aprovacao: fundador nao deve gastar voto analisando ficha incompleta.
+ * aprovacao: fundadora nao deve gastar endosso analisando ficha incompleta.
  */
 export function parseStoreProfile(input: unknown): Result<StoreProfile, DomainError> {
   if (typeof input !== 'object' || input === null) {
@@ -157,7 +164,7 @@ export function isFounder(store: Store): boolean {
 /**
  * Fundadora **desta** praca. O sufixo existe porque `isFounder` sozinho vira
  * uma pergunta perigosa quando ha mais de um cluster: fundadora de Curitiba nao
- * vota em Londrina.
+ * endossa candidata de Londrina.
  */
 export function isFounderOf(store: Store, clusterId: ClusterId): boolean {
   return isFounder(store) && store.clusterId === clusterId;
@@ -171,8 +178,9 @@ export function canTransact(store: Store): boolean {
  * Endossar credenciamento exige loja fundadora ativa e usuario titular.
  * Concentrar a regra aqui evita reimplementa-la em cada rota.
  *
- * Endosso nao e voto: quem admite e a plataforma. O que a fundadora faz aqui e
- * colocar a reputacao dela atras de uma candidata que ela conhece.
+ * O endosso decide: o terceiro credencia, sem passo da plataforma no meio. O
+ * que a fundadora faz aqui e colocar a reputacao dela atras de uma candidata que
+ * ela conhece de praca.
  */
 export function canEndorseMembership(
   store: Store,

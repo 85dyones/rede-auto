@@ -1,7 +1,7 @@
 /**
  * Constituicao da rede para desenvolvimento e demonstracao.
  *
- * Cria o cluster do piloto — Curitiba e Regiao Metropolitana — com as 6 lojas
+ * Cria o cluster do piloto — Curitiba e Regiao Metropolitana — com as lojas
  * fundadoras, titular e vendedor de cada uma, chaves de API previsiveis
  * e um estoque inicial de exemplo. Serve para poder exercitar a API por
  * completo em um `npm start` sem preparar nada antes.
@@ -12,7 +12,11 @@
 
 import { StoreKind, StoreStatus, UserRole, type NetworkUser, type Store } from '../domain/network/store.ts';
 import { asClusterId, asStoreId, asUserId, asVehicleId } from '../domain/shared/ids.ts';
-import { type Cluster, ClusterStatus } from '../domain/cluster/cluster.ts';
+import {
+  type Cluster,
+  ClusterStatus,
+  DEFAULT_FOUNDING_WINDOW_DAYS,
+} from '../domain/cluster/cluster.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import { DAY } from '../domain/shared/clock.ts';
 import {
@@ -45,6 +49,12 @@ export type SeedResult = {
  * O piloto. Todas as fundadoras cabem num raio em que o carro sai de um patio e
  * chega no outro dentro da manha — que e o que faz o SLA de 4 horas uteis ser
  * uma promessa, e nao uma ficcao.
+ *
+ * Sao dez lojas aqui porque dez e o alvo do piloto, nao porque dez seja
+ * exigido: a praca abre com quem entrou na janela de fundacao. Tirar linhas
+ * desta lista nao quebra nada — nenhum lugar do sistema declara a contagem.
+ * O caminho da praca pequena e exercitado em `membership.test.ts`, com
+ * `buildFoundingNetwork(3)`.
  *
  * Sao Jose dos Pinhais fica a ~15 km de Curitiba, Colombo a ~18, Pinhais a ~12,
  * Araucaria a ~27. O raio declarado de 60 km cobre a regiao com folga e ainda
@@ -183,6 +193,10 @@ export async function seedFoundingNetwork(
     operatingRadiusKm: 60,
     status: ClusterStatus.ACTIVE,
     foundedAt: now,
+    // A janela do piloto fica ABERTA no seed de proposito: e o unico jeito de a
+    // demonstracao exercitar o caminho da fundadora que entra depois. Fechar a
+    // janela e uma linha aqui, e e o que vai acontecer na praca de verdade.
+    foundingWindowEndsAt: now + DEFAULT_FOUNDING_WINDOW_DAYS * DAY,
   };
   await context.repos.clusters.save(cluster);
 

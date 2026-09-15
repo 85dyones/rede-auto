@@ -132,7 +132,7 @@ function buildRouter(context: AppContext, config: AppConfig): Router {
           travaTetoHoras: config.policies.lock.maxTotalMs / 3_600_000,
           recallHorasUteis: config.policies.recall.slaBusinessHours,
           endossosParaCredenciar: config.policies.governance.requiredEndorsements,
-          fundadoras: config.policies.governance.founderCount,
+          janelaCandidaturaDias: config.policies.governance.applicationWindowDays,
         },
       }),
     { public: true },

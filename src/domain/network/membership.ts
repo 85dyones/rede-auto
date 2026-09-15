@@ -20,6 +20,11 @@
  *    decisao e a loja poder operar: seriam dois estados para o mesmo fato, e o
  *    segundo so existiria para alguem esquecer dele.
  *
+ * 4. QUANTAS fundadoras existem nao e politica, e fato: elas sao contadas no
+ *    repositorio. O numero e flexivel por decisao de produto — quem entrar na
+ *    janela de fundacao, leva — e um `founderCount: 10` declarado em constante
+ *    mentiria sobre a praca no dia em que a janela fechasse com oito.
+ *
  * O limite conhecido deste desenho: endossos numa praca de 60 km nao sao
  * independentes — as fundadoras se conhecem, compram nos mesmos leiloes. Tres
  * endossos medem reputacao no mercado, nao saude financeira. O contrapeso nao
@@ -44,9 +49,12 @@ import {
   type NetworkUser,
   type Store,
   type StoreProfile,
+  StoreKind,
   canEndorseMembership,
   canTransact,
+  isFounderOf,
 } from './store.ts';
+import { type Cluster, requireSameCluster, withinFoundingWindow } from '../cluster/cluster.ts';
 
 export const MembershipStatus = {
   PENDING: 'PENDING',
@@ -91,13 +99,25 @@ export type MembershipApplication = {
   readonly resultingStoreId: StoreId | null;
 };
 
+/**
+ * O que a praca decidiu sobre credenciamento. Note o que NAO esta aqui: o
+ * numero de fundadoras. Ele foi tirado de proposito — uma praca pode abrir com
+ * dez fundadoras ou com seis, conforme quem entrou na janela de fundacao, e um
+ * numero declarado em politica acabaria mentindo sobre o mundo na primeira vez
+ * que a realidade divergisse. Fundadora se conta no repositorio.
+ */
 export type GovernancePolicy = {
-  /** Quantas lojas fundadoras existem. Fixo em 10 na constituicao da praca. */
-  readonly founderCount: number;
   /**
    * Endossos que credenciam. E decisorio: o terceiro endosso ja admite, sem
    * passo intermediario. Quem decide quem entra sao os membros — a plataforma
    * so opera.
+   *
+   * Fixo, e nao proporcional ao tamanho da praca. Proporcional pareceria mais
+   * justo e seria pior: numa praca de seis fundadoras, "metade" seriam tres, e
+   * numa de dez, cinco — o mesmo aval valeria coisas diferentes conforme quantas
+   * lojas fecharam a janela de fundacao, que e um acidente de calendario. Tres
+   * lojas respondendo por uma quarta e a unidade de confianca da rede; ela nao
+   * encolhe porque a praca e pequena.
    */
   readonly requiredEndorsements: number;
   /**
@@ -112,7 +132,6 @@ export type GovernancePolicy = {
 };
 
 export const DEFAULT_GOVERNANCE_POLICY: GovernancePolicy = {
-  founderCount: 10,
   requiredEndorsements: 3,
   applicationWindowDays: 30,
 };
@@ -122,24 +141,57 @@ export type EndorsementTally = {
   readonly required: number;
   readonly stillNeeded: number;
   readonly credentialed: boolean;
-  /** Fundadoras que ainda podem endossar (a padrinho nao entra na conta). */
+  /** Fundadoras que ainda podem endossar: existem, estao ativas e nao endossaram. */
   readonly foundersYetToEndorse: number;
+  /**
+   * Ainda da para chegar aos endossos necessarios?
+   *
+   * So existe porque o numero de fundadoras e flexivel. Numa praca que fechou a
+   * janela com quatro fundadoras e uma delas apadrinhou a candidata, sobram
+   * tres para dar tres endossos: possivel, mas por unanimidade. Com uma
+   * fundadora a menos, a candidatura ja nasce aritmeticamente morta — e sem este
+   * campo o unico sinal disso seria a caducidade, trinta dias depois, sem que
+   * ninguem soubesse que nunca houve chance. Melhor dizer na hora.
+   */
+  readonly reachable: boolean;
 };
 
+/**
+ * Apura uma candidatura contra as fundadoras que a praca tem de fato.
+ *
+ * `activeFounders` e obrigatorio e vem do repositorio — nao ha valor padrao de
+ * proposito. Um default aqui seria um numero inventado exibido como se fosse
+ * apurado, e e exatamente esse o erro que a janela de fundacao torna possivel.
+ */
 export function endorsementTally(
   application: MembershipApplication,
+  activeFounders: readonly Store[],
   policy: GovernancePolicy = DEFAULT_GOVERNANCE_POLICY,
 ): EndorsementTally {
   const endorsements = application.endorsements.length;
-  // A padrinho nao endossa a propria indicacao, entao ela sai do denominador.
-  const elegiveis = Math.max(0, policy.founderCount - 1);
+  const stillNeeded = Math.max(0, policy.requiredEndorsements - endorsements);
+  const jaEndossaram = new Set(application.endorsements.map((e) => e.founderStoreId));
+
+  // O filtro espelha `canEndorseMembership` de proposito, menos o papel do
+  // usuario: se a apuracao usasse um criterio proprio, ela contaria como
+  // disponivel uma fundadora que `endorse` vai recusar. Fundadora suspensa nao
+  // endossa; de outra praca, tampouco; e a padrinho nao endossa a propria
+  // indicacao.
+  const podemAinda = activeFounders.filter(
+    (founder) =>
+      isFounderOf(founder, application.clusterId) &&
+      canTransact(founder) &&
+      founder.id !== application.sponsorStoreId &&
+      !jaEndossaram.has(founder.id),
+  ).length;
 
   return {
     endorsements,
     required: policy.requiredEndorsements,
-    stillNeeded: Math.max(0, policy.requiredEndorsements - endorsements),
-    credentialed: endorsements >= policy.requiredEndorsements,
-    foundersYetToEndorse: Math.max(0, elegiveis - endorsements),
+    stillNeeded,
+    credentialed: stillNeeded === 0,
+    foundersYetToEndorse: podemAinda,
+    reachable: stillNeeded <= podemAinda,
   };
 }
 
@@ -262,19 +314,25 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
   ];
 
   const updated: MembershipApplication = { ...application, endorsements };
-  const contagem = endorsementTally(updated, policy);
+
+  // Contagem local, de proposito: decidir se credencia depende so de quantos
+  // endossos existem contra quantos a politica exige. Quantas fundadoras a
+  // praca tem nao entra nesta conta — e um fato do repositorio, e o dominio
+  // puro nao o tem em maos nem precisa dele para decidir.
+  const total = endorsements.length;
+  const stillNeeded = Math.max(0, policy.requiredEndorsements - total);
 
   const events: DomainEvent[] = [
     domainEvent('membership.endorsed', application.id, command.now, {
       clusterId: application.clusterId,
       founderStoreId: founderStore.id,
       updatedPreviousEndorsement: previous !== undefined,
-      endorsements: contagem.endorsements,
-      stillNeeded: contagem.stillNeeded,
+      endorsements: total,
+      stillNeeded,
     }),
   ];
 
-  if (!contagem.credentialed) return transitioned(updated, events);
+  if (stillNeeded > 0) return transitioned(updated, events);
 
   // O endosso que fecha a conta ja credencia. Um passo intermediario entre a
   // decisao e a loja operar seriam dois estados para o mesmo fato.
@@ -289,7 +347,7 @@ export function endorse(command: EndorseCommand): Transition<MembershipApplicati
       clusterId: application.clusterId,
       candidateCnpj: application.candidate.cnpj,
       candidateTradeName: application.candidate.tradeName,
-      endorsements: contagem.endorsements,
+      endorsements: total,
       endorsedBy: endorsements.map((e) => e.founderStoreId),
     }),
   );
@@ -376,13 +434,20 @@ export function withdrawApplication(
 }
 
 /**
- * Efetiva a loja aprovada. Separado de `castVote` de proposito: aprovar e um
+ * Efetiva a loja aprovada. Separado do endosso de proposito: credenciar e um
  * ato de governanca, criar a loja e um ato de provisionamento (id, usuarios,
  * chaves de acesso), e os dois falham por motivos diferentes.
+ *
+ * O `cluster` e parametro obrigatorio, e nao um id: e ele quem decide se a
+ * loja nasce FUNDADORA ou MEMBRO, porque so ele sabe quando a janela de
+ * fundacao fecha. Exigi-lo aqui faz o compilador apontar toda chamada que
+ * precisaria ser revista — o mesmo remedio ja usado em `dealDto(deal, viewer)`
+ * e em `loadVehicle(actor)`.
  */
 export function admitApprovedStore(
   application: MembershipApplication,
   newStoreId: StoreId,
+  cluster: Cluster,
   now: Instant,
 ): Result<{ store: Store; application: MembershipApplication }, DomainError> {
   if (application.status !== MembershipStatus.APPROVED) {
@@ -403,11 +468,19 @@ export function admitApprovedStore(
     );
   }
 
+  const mesmaPraca = requireSameCluster(application, { clusterId: cluster.id }, 'A candidatura');
+  if (!mesmaPraca.ok) return mesmaPraca;
+
+  // Quem entrar na janela de fundacao, leva. Nao ha campo dizendo por que esta
+  // loja e fundadora: `joinedAt` contra `foundingWindowEndsAt` ja responde, e um
+  // segundo registro do mesmo fato so existiria para divergir do primeiro.
+  const fundadora = withinFoundingWindow(cluster, now);
+
   const store: Store = {
     id: newStoreId,
     clusterId: application.clusterId,
     profile: application.candidate,
-    kind: 'MEMBER',
+    kind: fundadora ? StoreKind.FOUNDER : StoreKind.MEMBER,
     status: 'ACTIVE',
     joinedAt: now,
     tradeInDefault: TradeInStance.CONSIDERS,

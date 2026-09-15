@@ -456,7 +456,68 @@ novo sem persistir, então envolver "carregar → decidir → salvar" numa trans
 
 ---
 
-## 24. O que ficou de fora, e por quê
+## 24. A janela de fundação: quem entra na janela, leva
+
+**Decisão.** O número de fundadoras deixa de ser política (`founderCount` sai de
+`GovernancePolicy`) e passa a ser um fato contado no repositório. Quem decide se
+uma loja credenciada nasce `FOUNDER` ou `MEMBER` é uma data no cluster:
+`foundingWindowEndsAt`, 90 dias por padrão, teto de um ano.
+
+**Por quê.** O alvo são dez fundadoras, mas dez é alvo, não requisito. Fixar a
+contagem obrigaria a praça a escolher entre duas derrotas: esperar a décima loja,
+adiando o piloto por quem talvez nunca venha, ou recusar a nona, perdendo quem já
+estava dentro. A data resolve os dois casos com a mesma regra, e tem uma vantagem
+lateral que não é pequena: prazo visível fecha negócio. "A condição de fundadora
+acaba em março" é argumento de venda; "somos dez, e já temos oito" não é.
+
+A consequência técnica é maior que a mudança de produto. Com o número flexível,
+um `founderCount: 10` declarado em constante vira uma afirmação que **mente**
+sobre o mundo no primeiro dia em que a janela fecha com oito — e mente numa tela
+que a padrinho usa para decidir se vale apresentar uma candidata. Então ele sai
+de vez: `endorsementTally` exige o rol de fundadoras como parâmetro obrigatório,
+sem valor padrão, e o serviço o obtém de `repos.stores.founders(clusterId)`. O
+compilador apontou as sete chamadas — o mesmo remédio de `dealDto(deal, viewer)`
+e de `VehicleQuery.clusterId`.
+
+**Consequência.**
+
+- `admitApprovedStore` recebe o `Cluster` inteiro, não um id: é ele quem sabe
+  quando a janela fecha. Parâmetro obrigatório pela mesma razão de sempre.
+- A comparação é estrita (`now < foundingWindowEndsAt`). O limite tem de cair de
+  um lado só, ou duas lojas credenciadas no mesmo milissegundo receberiam
+  condições comerciais diferentes conforme a ordem de gravação.
+- **Nenhum campo registra por que a loja é fundadora.** `joinedAt` contra a
+  janela responde sozinho; um segundo registro do mesmo fato só existiria para
+  divergir do primeiro. Há um teste que reconstrói a resposta exatamente assim.
+- `foundersYetToEndorse` passou a ser verdade: conta as fundadoras que existem,
+  estão ativas, não são a padrinho e ainda não endossaram. Antes era
+  `founderCount - 1 - endossos`, que ignorava suspensão e ignorava *quem*
+  endossou.
+
+**O sinal novo: `reachable`.** Três endossos é fixo, e não proporcional ao
+tamanho da praça — proporcional pareceria mais justo e seria pior, porque o mesmo
+aval valeria coisas diferentes conforme um acidente de calendário. Mas fixo tem
+um efeito aritmético que o número flexível torna possível: numa praça que fechou
+a janela com três fundadoras, e uma delas apadrinha, sobram duas para dar três
+endossos. A candidatura nasce morta.
+
+Sem sinal, a única notícia disso seria a caducidade trinta dias depois — e nem a
+padrinho nem a candidata saberiam que nunca houve chance. `apuracao.alcancavel`
+diz na abertura. Não bloqueia a candidatura de propósito: a praça pode admitir
+outra fundadora dentro da janela e destravar a conta.
+
+**Descartado.** Baixar `requiredEndorsements` automaticamente em praça pequena.
+Faria a qualidade flutuar para baixo exatamente onde há menos gente para julgar,
+que é onde ela deveria valer mais.
+
+**Limite aceito.** Quem entra na janela leva a condição de fundadora **sem**
+passar pelo crivo de três endossos — fundadoras são constituintes, não
+credenciadas. É o preço de montar a praça, e é a razão do teto de um ano na
+janela: larga demais, a exceção vira regra e a adesão cheia nunca entra.
+
+---
+
+## 25. O que ficou de fora, e por quê
 
 | Fora de escopo | Motivo |
 |---|---|

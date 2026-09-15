@@ -16,6 +16,11 @@ import {
   UserRole,
 } from '../domain/network/store.ts';
 import {
+  type Cluster,
+  ClusterStatus,
+  DEFAULT_FOUNDING_WINDOW_DAYS,
+} from '../domain/cluster/cluster.ts';
+import {
   asClusterId,
   asStoreId,
   asUserId,
@@ -30,6 +35,31 @@ import {
  * visivel na leitura.
  */
 export const TEST_CLUSTER_ID: ClusterId = asClusterId('clu_test');
+
+/**
+ * A praca dos testes, com a janela de fundacao ABERTA por padrao.
+ *
+ * O default e o aberto porque e o estado em que uma praca nasce, e porque o
+ * teste que precisa do outro lado — a loja que chega tarde e entra como membro
+ * — tem de dizer isso em voz alta: `buildCluster({ foundingWindowEndsAt: X })`.
+ * O contrario esconderia a regra mais nova do credenciamento atras de um
+ * default silencioso.
+ */
+export function buildCluster(overrides: Partial<Cluster> = {}): Cluster {
+  const foundedAt = overrides.foundedAt ?? 0;
+  return {
+    id: overrides.id ?? TEST_CLUSTER_ID,
+    name: overrides.name ?? 'Praca de Teste',
+    slug: overrides.slug ?? 'praca-teste',
+    state: overrides.state ?? 'SP',
+    cities: overrides.cities ?? ['Campinas'],
+    operatingRadiusKm: overrides.operatingRadiusKm ?? 60,
+    status: overrides.status ?? ClusterStatus.ACTIVE,
+    foundedAt,
+    foundingWindowEndsAt:
+      overrides.foundingWindowEndsAt ?? foundedAt + DEFAULT_FOUNDING_WINDOW_DAYS * DAY,
+  };
+}
 
 /** CNPJs com digito verificador valido, para nao esbarrar na validacao real. */
 const VALID_CNPJS = [
@@ -104,7 +134,13 @@ export type FoundingNetwork = {
   principalAt(index: number): NetworkUser;
 };
 
-/** As 6 lojas fundadoras mais o titular de cada uma. */
+/**
+ * As lojas fundadoras da praca mais o titular de cada uma.
+ *
+ * `count` e parametro, e nao constante, porque o numero de fundadoras e
+ * flexivel por desenho: a praca abre com quem entrou na janela. Os testes de
+ * alcance do endosso dependem justamente de poder pedir uma praca pequena.
+ */
 export function buildFoundingNetwork(count = 6): FoundingNetwork {
   resetCnpjCursor();
   const names = [

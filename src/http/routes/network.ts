@@ -42,13 +42,15 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
         request.requestId,
       );
     }
-    return json(200, { cluster: clusterDto(cluster) });
+    return json(200, { cluster: clusterDto(cluster, context.clock.now()) });
   });
 
   router.get('/api/v1/lojas/fundadoras', async (request) => {
     const actor = requireActor(request);
     if (!actor.ok) return errorResponse(actor.error, request.requestId);
 
+    // `total` vem da contagem, nunca de politica: quantas fundadoras a praca tem
+    // depende de quem entrou antes de a janela de fundacao fechar.
     const founders = await context.repos.stores.founders(actor.value.store.clusterId);
     return json(200, {
       total: founders.length,
@@ -109,42 +111,6 @@ export function registerNetworkRoutes(router: Router, context: AppContext): void
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
     return json(200, applicationDto(result.value.application, result.value.tally, result.value.admittedStore));
-  });
-
-  router.get('/api/v1/credenciamentos', async (request) => {
-    const actor = requireActor(request);
-    if (!actor.ok) return errorResponse(actor.error, request.requestId);
-
-    const pending = await context.repos.memberships.pending(actor.value.store.clusterId);
-    const views = [];
-    for (const application of pending) {
-      const view = await viewApplication(context, application.id);
-      if (view.ok) views.push(applicationDto(view.value.application, view.value.tally, null));
-    }
-    return json(200, { total: views.length, candidaturas: views });
-  });
-
-  /**
-   * Endosso de fundadora. NAO credencia — a candidatura segue pendente ate a
-   * plataforma decidir. Endosso e a palavra de quem conhece a candidata; a
-   * admissao e decisao de quem opera a rede.
-   */
-  router.post('/api/v1/credenciamentos/:id/endossos', async (request) => {
-    const actor = requireActor(request);
-    if (!actor.ok) return errorResponse(actor.error, request.requestId);
-
-    const body = asObject(request.body);
-    if (!body.ok) return errorResponse(body.error, request.requestId);
-
-    const result = await endorseApplication(
-      context,
-      actor.value,
-      asApplicationId(request.params['id'] as string),
-      optionalText(body.value, 'justificativa'),
-    );
-    if (!result.ok) return errorResponse(result.error, request.requestId);
-
-    return json(200, applicationDto(result.value.application, result.value.tally, null));
   });
 
   router.delete('/api/v1/credenciamentos/:id', async (request) => {

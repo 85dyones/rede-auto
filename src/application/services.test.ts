@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { buildApplication, type Application } from '../bootstrap.ts';
 import { loadConfig } from '../config.ts';
-import { FakeClock, HOUR } from '../domain/shared/clock.ts';
+import { DAY, FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import { FuelType, TradeInStance, TransmissionType } from '../domain/vehicle/vehicle.ts';
@@ -12,6 +12,8 @@ import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody
 import type { Actor } from './context.ts';
 import { loadVehicle, openCommercialLock, registerVehicle, searchCatalog } from './inventory-service.ts';
 import { startCustodyTransfer } from './custody-service.ts';
+import { endorseApplication, submitApplication, viewApplication } from './governance-service.ts';
+import { StoreKind, StoreStatus, type Store } from '../domain/network/store.ts';
 import { runSweep, startSweeper } from './scheduler.ts';
 
 /** Termo com as cinco fotos obrigatorias — o minimo que a custodia exige. */
@@ -329,6 +331,90 @@ describe('fronteira entre pracas', () => {
       0,
       'carro que voltou a rede em Curitiba nao interessa — e nao pode ser visto — em Londrina',
     );
+    await app.stop();
+  });
+});
+
+describe('janela de fundacao: quem entrar na janela, leva', () => {
+  const candidata = {
+    legalName: 'Nova Garagem Veiculos LTDA',
+    tradeName: 'Nova Garagem',
+    cnpj: '07.526.557/0001-00',
+    city: 'Sao Jose dos Pinhais',
+    state: 'PR',
+    phone: '(41) 99876-5432',
+    email: 'contato@novagaragem.com.br',
+    responsibleName: 'Joao Pereira',
+  };
+
+  /** Apresenta a candidata pela loja 0 e junta os tres endossos das lojas 1..3. */
+  async function credenciar(app: Application): Promise<Store> {
+    const seed = app.seed!;
+    const ator = (i: number): Actor => ({ store: seed.stores[i]!.store, user: seed.stores[i]!.principal });
+
+    const aberta = await submitApplication(app.context, ator(0), candidata);
+    assert.ok(aberta.ok);
+
+    let ultima = aberta;
+    for (const i of [1, 2, 3]) {
+      const passo = await endorseApplication(app.context, ator(i), aberta.value.application.id);
+      assert.ok(passo.ok);
+      ultima = passo;
+    }
+
+    assert.equal(ultima.value.application.status, 'APPROVED');
+    assert.ok(ultima.value.admittedStore !== null, 'o terceiro endosso ja credencia');
+    return ultima.value.admittedStore;
+  }
+
+  test('credenciada dentro da janela, a loja nasce FUNDADORA', async () => {
+    const { app } = await novaApp();
+
+    const loja = await credenciar(app);
+    assert.equal(loja.kind, StoreKind.FOUNDER);
+
+    const fundadoras = await app.context.repos.stores.founders(loja.clusterId);
+    assert.equal(fundadoras.length, 11, 'o rol cresce — e por isso que ele e contado, nao declarado');
+    await app.stop();
+  });
+
+  test('fechada a janela, a mesma candidatura vira MEMBER', async () => {
+    const { app, clock } = await novaApp();
+    const praca = (await app.context.repos.clusters.byId(app.seed!.cluster.id))!;
+
+    // Um dia depois do fim da janela. Nada mais muda: mesma candidata, mesmos
+    // tres endossos, mesmas fundadoras.
+    clock.set(praca.foundingWindowEndsAt + DAY);
+
+    const loja = await credenciar(app);
+    assert.equal(loja.kind, StoreKind.MEMBER);
+
+    const fundadoras = await app.context.repos.stores.founders(loja.clusterId);
+    assert.equal(fundadoras.length, 10, 'o rol de fundadoras esta fechado');
+    await app.stop();
+  });
+
+  test('a apuracao acompanha a praca em vez de repetir um numero de politica', async () => {
+    const { app } = await novaApp();
+    const seed = app.seed!;
+    const ator = (i: number): Actor => ({ store: seed.stores[i]!.store, user: seed.stores[i]!.principal });
+
+    const aberta = await submitApplication(app.context, ator(0), candidata);
+    assert.ok(aberta.ok);
+    // 10 fundadoras, menos a padrinho.
+    assert.equal(aberta.value.tally.foundersYetToEndorse, 9);
+    assert.equal(aberta.value.tally.reachable, true);
+
+    // Suspender fundadoras tira cada uma da conta: quem nao pode endossar nao
+    // deve aparecer como se pudesse.
+    for (const i of [1, 2, 3, 4, 5, 6, 7]) {
+      await app.context.repos.stores.save({ ...seed.stores[i]!.store, status: StoreStatus.SUSPENDED });
+    }
+
+    const revista = await viewApplication(app.context, aberta.value.application.id);
+    assert.ok(revista.ok);
+    assert.equal(revista.value.tally.foundersYetToEndorse, 2, 'sobraram duas ativas alem da padrinho');
+    assert.equal(revista.value.tally.reachable, false, 'duas nao fecham tres endossos');
     await app.stop();
   });
 });

@@ -23,14 +23,17 @@
 
 import { type Result, ok, err, combine } from '../shared/result.ts';
 import { type DomainError, validationError, forbiddenError } from '../shared/errors.ts';
-import type { Instant } from '../shared/clock.ts';
+import { type Instant, DAY } from '../shared/clock.ts';
 import type { ClusterId } from '../shared/ids.ts';
 import { requireText, requireOneOf } from '../shared/validation.ts';
 
 export const ClusterStatus = {
   /** Operando: lojas transacionam normalmente. */
   ACTIVE: 'ACTIVE',
-  /** Constituida, ainda sem as fundadoras completas. Nao transaciona. */
+  /**
+   * Constituida, ainda nao transaciona. Nao e "faltam fundadoras" — o numero
+   * delas e flexivel. E que a praca ainda nao foi aberta pela governanca.
+   */
   FORMING: 'FORMING',
   /** Encerrada. Historico preservado, nada novo entra. */
   CLOSED: 'CLOSED',
@@ -58,6 +61,23 @@ export type Cluster = {
   readonly operatingRadiusKm: number;
   readonly status: ClusterStatus;
   readonly foundedAt: Instant;
+  /**
+   * Fim da janela de fundacao. Quem for credenciado antes deste instante entra
+   * como FUNDADORA; depois, como membro comum.
+   *
+   * A janela existe porque o numero de fundadoras e deliberadamente flexivel —
+   * idealmente dez, podem ser menos. Fixar a contagem obrigaria a rede a
+   * escolher entre esperar a decima loja (adiando o piloto por quem talvez
+   * nunca venha) e recusar a nona (perdendo quem ja estava dentro). A data
+   * resolve os dois: quem entrar na janela, leva. Vantagem lateral, e nao
+   * pequena: a data e argumento de venda — o desconto de fundadora tem prazo
+   * visivel, e prazo visivel fecha negocio.
+   *
+   * Consequencia direta no codigo: `founderCount` deixa de ser politica. O
+   * numero de fundadoras passa a ser um fato do repositorio, contado, nunca
+   * declarado.
+   */
+  readonly foundingWindowEndsAt: Instant;
 };
 
 const UF = [
@@ -88,6 +108,8 @@ export type ClusterDraft = {
   readonly state: string;
   readonly cities: readonly string[];
   readonly operatingRadiusKm: number;
+  /** Duracao da janela de fundacao, em dias corridos a partir da constituicao. */
+  readonly foundingWindowDays: number;
 };
 
 export function parseClusterDraft(input: unknown): Result<ClusterDraft, DomainError> {
@@ -103,6 +125,7 @@ export function parseClusterDraft(input: unknown): Result<ClusterDraft, DomainEr
     state: requireOneOf(state, 'UF', UF),
     cities: parseCities(raw['cities']),
     operatingRadiusKm: parseRadius(raw['operatingRadiusKm']),
+    foundingWindowDays: parseFoundingWindow(raw['foundingWindowDays']),
   });
 }
 
@@ -147,8 +170,58 @@ function parseRadius(value: unknown): Result<number, DomainError> {
   return ok(Math.round(value));
 }
 
+/**
+ * Noventa dias. Curto o bastante para ser argumento ("a condicao de fundadora
+ * acaba em marco") e longo o bastante para caber um ciclo de conversa com as
+ * lojas que ainda estao decidindo. O teto de um ano existe para impedir o unico
+ * erro grave possivel aqui: uma janela tao larga que a rede inteira acaba
+ * fundadora e o desconto de adesao nunca vira receita cheia.
+ */
+export const DEFAULT_FOUNDING_WINDOW_DAYS = 90;
+export const MAX_FOUNDING_WINDOW_DAYS = 365;
+
+function parseFoundingWindow(value: unknown): Result<number, DomainError> {
+  if (value === undefined || value === null) return ok(DEFAULT_FOUNDING_WINDOW_DAYS);
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    return err(
+      validationError(
+        'FOUNDING_WINDOW_INVALID',
+        'Janela de fundacao: informe os dias em numero inteiro positivo.',
+        { received: value },
+      ),
+    );
+  }
+  if (value > MAX_FOUNDING_WINDOW_DAYS) {
+    return err(
+      validationError(
+        'FOUNDING_WINDOW_TOO_LONG',
+        `Janela de fundacao acima de ${MAX_FOUNDING_WINDOW_DAYS} dias: a condicao de fundadora ` +
+          'deixa de ser excecao e a adesao cheia nunca entra.',
+        { received: value, max: MAX_FOUNDING_WINDOW_DAYS },
+      ),
+    );
+  }
+  return ok(value);
+}
+
 export function transactsInCluster(cluster: Cluster): boolean {
   return cluster.status === ClusterStatus.ACTIVE;
+}
+
+/**
+ * A janela de fundacao ainda esta aberta?
+ *
+ * Estritamente menor: no instante exato do fim, a janela fechou. O limite tem
+ * de cair de um lado so, ou duas lojas credenciadas no mesmo milissegundo
+ * receberiam condicoes diferentes conforme a ordem de gravacao.
+ */
+export function withinFoundingWindow(cluster: Cluster, now: Instant): boolean {
+  return now < cluster.foundingWindowEndsAt;
+}
+
+/** Quanto falta da janela, em dias corridos. Zero quando ja fechou. */
+export function foundingWindowDaysLeft(cluster: Cluster, now: Instant): number {
+  return Math.max(0, Math.ceil((cluster.foundingWindowEndsAt - now) / DAY));
 }
 
 // ---------------------------------------------------------------------------

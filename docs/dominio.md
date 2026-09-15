@@ -33,12 +33,12 @@ um SLA, é uma ficção.
 Daí o cluster **não** ser um filtro de busca. Filtro se esquece de aplicar;
 fronteira não. `Store.clusterId` e `Vehicle.clusterId` são imutáveis — mudar de
 praça não é editar um campo, é sair de uma rede e se credenciar em outra, com
-quórum novo.
+endossos novos.
 
 ```
    cluster "curitiba-rmc"                 cluster "londrina" (futuro)
    ┌──────────────────────────┐           ┌──────────────────────────┐
-   │  6 fundadoras            │           │  fundadoras próprias     │
+   │  fundadoras da janela    │           │  fundadoras próprias     │
    │  estoque                 │     ╳     │  estoque                 │
    │  custódia física         │  não se   │  custódia física         │
    │  endossos próprios       │  cruzam   │  endossos próprios       │
@@ -376,34 +376,45 @@ Regras que a conta impõe:
 ```
      openApplication
           │
-          ▼
-                    endorse (n vezes, não decide nada)
-                              │
-       PENDING ───────────────┴──── admitCandidate ──► APPROVED ──► loja MEMBER
-          │                              (plataforma)
-          ├──── rejectCandidate ────► REJECTED
-          │        (plataforma, motivo obrigatório)
-          └──── withdrawApplication ──► WITHDRAWN
+          ▼                    endorse (1º, 2º — nada muda de estado)
+                                        │
+       PENDING ─────────────────────────┴──── endorse (3º) ──► APPROVED
+          │                                                        │
+          ├──── lapseApplication ──► LAPSED                        ▼
+          │        (30 dias sem juntar os endossos)         admitApprovedStore
+          │                                                        │
+          └──── withdrawApplication ──► WITHDRAWN         janela aberta? FOUNDER
+                   (só a padrinho)                        fechada?      MEMBER
 ```
 
-**Endosso não é voto.** A fundadora coloca a reputação atrás de uma candidata que
-conhece; quem admite é a plataforma. A diferença é de incentivo: enquanto o
-credenciamento era quórum, as fundadoras podiam barrar concorrência direta e
-chamar isso de critério.
+**Quem decide quem entra são os membros.** A fundadora coloca a reputação dela
+atrás de uma candidata que conhece de praça; três endossos credenciam, sem passo
+da plataforma no meio. A plataforma só opera.
 
-- só o titular (`PRINCIPAL`) de loja fundadora ativa endossa;
+- só o titular (`PRINCIPAL`) de loja fundadora **ativa** endossa;
 - **não existe endosso contrário** — quem tem restrição não endossa, e a ausência
-  já é o sinal. Modelar rejeição devolveria o veto pela porta dos fundos;
-- a padrinho não endossa a própria indicação, e sai do denominador da apuração;
-- endossar de novo atualiza a nota, não soma.
+  já é o sinal. Modelar rejeição daria a cada fundadora um veto individual sobre
+  concorrência direta;
+- a padrinho não endossa a própria indicação, e sai da apuração;
+- endossar de novo atualiza a nota, não soma — sem isso, uma fundadora
+  credenciaria sozinha endossando três vezes;
+- o terceiro endosso já credencia: um passo entre a decisão e a loja poder operar
+  seriam dois estados para o mesmo fato.
 
-A plataforma **pode** admitir abaixo de `recommendedEndorsements`, mas não em
-silêncio: exige `endorsementOverride` registrado na candidatura. É o que impede o
-endosso de virar enfeite sem transformá-lo em veto.
+Como não há recusa, existe **prazo**: a candidatura caduca em 30 dias. Sem isso,
+"pendente para sempre" seria uma recusa que ninguém precisa assinar.
 
-Decidir e credenciar são funções separadas de propósito: decidir é ato de
-governança, credenciar é provisionamento. Se a criação da loja falhar, a decisão
-permanece registrada e o provisionamento pode ser repetido.
+**O número de fundadoras é contado, não declarado.** `GovernancePolicy` não tem
+`founderCount`, e `endorsementTally` exige o rol de fundadoras como parâmetro
+obrigatório — o serviço o obtém de `repos.stores.founders(clusterId)`. Quem
+nasce fundadora é quem foi credenciada dentro da **janela de fundação** do
+cluster (`foundingWindowEndsAt`); depois dela, entra como membro. Ver
+[decisão 24](decisoes.md#24-a-janela-de-fundação-quem-entra-na-janela-leva).
+
+Credenciar e provisionar são funções separadas de propósito: credenciar é ato de
+governança, provisionar é infraestrutura. Se a criação da loja falhar (CNPJ
+duplicado), os endossos permanecem registrados e o provisionamento pode ser
+repetido sem novo aval.
 
 ## Eventos de domínio
 

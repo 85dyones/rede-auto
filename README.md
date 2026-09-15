@@ -24,7 +24,7 @@ se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 366 testes
+npm run check    # typecheck estrito + 409 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -94,7 +94,7 @@ A fronteira não depende de ninguém lembrar dela:
 - Broadcast de notificação exige `clusterId` no tipo; um aviso sem praça não
   chega a ninguém, em vez de chegar à rede errada.
 - `founders(clusterId)` e `pending(clusterId)`: o endosso é contado dentro de
-  uma praça só. Fundadora de Curitiba não vota em candidata de Londrina.
+  uma praça só. Fundadora de Curitiba não endossa candidata de Londrina.
 
 O que **não** existe ainda, e é deliberado: cobrança, provisionamento de praça e
 autoatendimento de SaaS. Só a fronteira, que é a parte cara depois.
@@ -227,8 +227,7 @@ carro em 12/03 às 14h32?**
 
 A rede é fechada, e a qualificação vem do **endosso**: uma fundadora coloca a
 reputação dela atrás de uma candidata que conhece de praça. **Três endossos
-credenciam**, entre as 10 fundadoras. A plataforma só opera — não vota, não veta,
-não admite.
+credenciam.** A plataforma só opera — não vota, não veta, não admite.
 
 **Não existe endosso contrário.** Quem tem restrição simplesmente não endossa, e
 a ausência já é o sinal. Modelar rejeição daria a cada fundadora um veto
@@ -239,14 +238,40 @@ endossos em 30 dias. Sem isso, "pendente para sempre" seria uma recusa que
 ninguém precisa assinar — e a candidata nunca saberia o que aconteceu.
 
 O terceiro endosso já credencia: não há passo entre a decisão e a loja poder
-operar. A padrinho não endossa a própria indicação, e quem entra depois não vira
-fundadora.
+operar. A padrinho não endossa a própria indicação.
+
+**Quantas fundadoras existem é um fato contado, não um número declarado.** O
+alvo é dez, mas a praça abre com quem entrou — e por isso nenhum lugar do
+sistema guarda um `founderCount`: pergunta-se ao repositório. Quem decide é a
+**janela de fundação** do cluster (`foundingWindowEndsAt`, 90 dias por padrão):
+credenciada dentro da janela, a loja nasce fundadora e paga meia adesão;
+credenciada depois, entra como membro e paga a adesão cheia. Nada registra *por
+que* a loja é fundadora — `joinedAt` contra a janela já responde, e um segundo
+registro do mesmo fato só existiria para divergir do primeiro.
+
+Três endossos é fixo, e não proporcional ao tamanho da praça. Proporcional
+pareceria mais justo e seria pior: numa praça de seis, "metade" seriam três, e
+numa de dez, cinco — o mesmo aval valeria coisas diferentes conforme quantas
+lojas fecharam a janela, o que é um acidente de calendário.
+
+O efeito colateral desse número fixo é aritmético, e a apuração o expõe: numa
+praça pequena pode não haver fundadoras suficientes para fechar três endossos.
+`apuracao.alcancavel` responde isso **na abertura da candidatura** — sem ele, a
+única notícia seria a caducidade trinta dias depois, sem ninguém saber que nunca
+houve chance.
 
 > **Limite conhecido.** Endossos numa praça de 60 km não são independentes — as
 > fundadoras se conhecem e compram nos mesmos leilões. Três endossos medem
 > reputação no mercado, não saúde financeira. O contrapeso não está aqui: está na
 > exposição graduada de quem acaba de entrar e no registro de conduta entre
 > lojas.
+>
+> A janela de fundação tem o seu próprio: quem entra na janela leva a condição
+> de fundadora **sem** ter passado pelo crivo de três endossos, porque as
+> fundadoras são constituintes, não credenciadas. Isso é aceito de propósito —
+> é o preço de montar a praça — mas é a razão de a janela ter teto de um ano.
+> Janela larga demais transforma a exceção em regra, e a adesão cheia nunca
+> entra.
 
 ## Material de divulgação
 
@@ -323,7 +348,7 @@ src/
 ├── domain/          núcleo funcional puro: sem I/O, sem framework, sem relógio real
 │   ├── shared/      Result, Money em centavos, Clock injetável, horas úteis, validação pt-BR
 │   ├── cluster/     a praça: fronteira de estoque, custódia e governança
-│   ├── network/     lojas, usuários, credenciamento por quórum
+│   ├── network/     lojas, usuários, credenciamento por endosso
 │   ├── vehicle/     o agregado central, com os dois eixos desacoplados
 │   ├── lock/        trava comercial com TTL e política de evidências
 │   ├── custody/     termo de vistoria assinado e livro de responsabilidade civil
@@ -413,7 +438,7 @@ sai em `GET /api/v1`.
 ## Estado do projeto
 
 Implementado e testado: todo o domínio, os casos de uso, a API HTTP, a ingestão
-de feeds, o material de divulgação e a trilha de auditoria. 366 testes,
+de feeds, o material de divulgação e a trilha de auditoria. 409 testes,
 typecheck estrito (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,
 `erasableSyntaxOnly`) sem erros.
 

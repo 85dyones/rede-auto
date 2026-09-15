@@ -92,3 +92,24 @@ describe('casamento de rotas', () => {
     assert.equal(router.match('GET', '/api/privada')?.isPublic, false);
   });
 });
+
+describe('rota duplicada e erro de programacao', () => {
+  test('registrar o mesmo metodo e caminho duas vezes explode no boot', () => {
+    // A segunda registrada seria inalcancavel, e quem a escreveu acharia que
+    // ela responde. Foi assim que um bloco de rotas de credenciamento
+    // sobreviveu a uma reescrita de governanca sem nunca ser servido.
+    const router = new Router();
+    router.get('/api/v1/credenciamentos', handler('primeira'));
+
+    assert.throws(
+      () => router.get('/api/v1/credenciamentos', handler('segunda')),
+      /Rota duplicada: GET \/api\/v1\/credenciamentos/,
+    );
+  });
+
+  test('mesmo caminho em metodos diferentes continua valendo', () => {
+    const router = new Router();
+    router.get('/api/v1/credenciamentos', handler('listagem'));
+    assert.doesNotThrow(() => router.post('/api/v1/credenciamentos', handler('criacao')));
+  });
+});

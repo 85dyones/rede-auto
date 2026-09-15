@@ -13,15 +13,27 @@ import {
   type MembershipApplication,
 } from './membership.ts';
 import { StoreKind, StoreStatus, UserRole, parseStoreProfile } from './store.ts';
-import { asApplicationId, asStoreId } from '../shared/ids.ts';
+import { asApplicationId, asClusterId, asStoreId } from '../shared/ids.ts';
 import { unwrap } from '../shared/result.ts';
-import { buildFoundingNetwork, buildStoreProfile, buildUser } from '../../testing/builders.ts';
+import {
+  buildCluster,
+  buildFoundingNetwork,
+  buildStoreProfile,
+  buildUser,
+} from '../../testing/builders.ts';
+import { DAY } from '../shared/clock.ts';
 
 const network = buildFoundingNetwork(6);
 const APPLICATION_ID = asApplicationId('app_0001');
 const NOW = Date.parse('2026-08-24T13:00:00Z');
 
-/** Candidata apresentada pelo fundador 0; fundadores 1..5 podem votar. */
+/** Praca com a janela de fundacao aberta. Quem for credenciado aqui e fundadora. */
+const PRACA = buildCluster({ foundedAt: NOW - 10 * DAY, foundingWindowEndsAt: NOW + 30 * DAY });
+
+/** A mesma praca depois de fechada a janela. Quem chega agora entra como membro. */
+const PRACA_FECHADA = buildCluster({ foundedAt: NOW - 400 * DAY, foundingWindowEndsAt: NOW - DAY });
+
+/** Candidata apresentada pela fundadora 0; fundadoras 1..5 podem endossar. */
 function pendingApplication(): MembershipApplication {
   return unwrap(
     openApplication({
@@ -70,14 +82,14 @@ describe('endosso: quem decide quem entra sao os membros', () => {
     const parcial = endorsedBy(pendingApplication(), [1, 2]);
 
     assert.equal(parcial.status, MembershipStatus.PENDING);
-    assert.equal(endorsementTally(parcial).stillNeeded, 1);
+    assert.equal(endorsementTally(parcial, network.founders).stillNeeded, 1);
   });
 
   test('nao existe endosso contrario', () => {
     // Quem tem restricao simplesmente nao endossa. Modelar rejeicao daria a
     // cada fundadora um veto individual sobre concorrencia direta — por isso
     // `endorse` nao tem parametro de decisao e nao ha como escrever "sou contra".
-    const tally = endorsementTally(pendingApplication());
+    const tally = endorsementTally(pendingApplication(), network.founders);
     assert.equal(tally.endorsements, 0);
     assert.equal(tally.credentialed, false);
   });
@@ -138,9 +150,82 @@ describe('endosso: quem decide quem entra sao os membros', () => {
     assert.equal(result.ok === false && result.error.code, 'NOT_AN_ENDORSING_FOUNDER');
   });
 
-  test('a apuracao tira a padrinho do denominador', () => {
-    const tally = endorsementTally(pendingApplication());
-    assert.equal(tally.foundersYetToEndorse, DEFAULT_GOVERNANCE_POLICY.founderCount - 1);
+  test('a apuracao conta as fundadoras que existem, nao um numero declarado', () => {
+    // Nada em GovernancePolicy diz quantas fundadoras ha — e de proposito: com
+    // janela de fundacao, esse numero e resultado, nao parametro.
+    const tally = endorsementTally(pendingApplication(), network.founders);
+
+    // Seis fundadoras, menos a padrinho, que nao endossa a propria indicacao.
+    assert.equal(tally.foundersYetToEndorse, 5);
+    assert.equal(tally.reachable, true);
+    assert.equal(
+      'founderCount' in DEFAULT_GOVERNANCE_POLICY,
+      false,
+      'o numero de fundadoras nao volta a ser politica',
+    );
+  });
+
+  test('quem ja endossou sai da conta de quem ainda pode endossar', () => {
+    const tally = endorsementTally(endorsedBy(pendingApplication(), [1, 2]), network.founders);
+
+    assert.equal(tally.endorsements, 2);
+    assert.equal(tally.foundersYetToEndorse, 3, 'seis, menos a padrinho, menos as duas que ja deram');
+  });
+
+  test('loja que nao e fundadora nao entra na apuracao nem se for passada', () => {
+    // O filtro espelha `canEndorseMembership`: se a apuracao usasse criterio
+    // proprio, mostraria como disponivel quem `endorse` vai recusar.
+    const comUmMembro = [
+      ...network.founders,
+      { ...network.founderAt(2), id: asStoreId('str_membro'), kind: StoreKind.MEMBER },
+    ];
+    assert.equal(
+      endorsementTally(pendingApplication(), comUmMembro).foundersYetToEndorse,
+      5,
+      'membro nao endossa',
+    );
+  });
+
+  test('fundadora de outra praca nao conta', () => {
+    const comForasteira = [
+      ...network.founders,
+      { ...network.founderAt(2), id: asStoreId('str_ldb'), clusterId: asClusterId('clu_londrina') },
+    ];
+    assert.equal(
+      endorsementTally(pendingApplication(), comForasteira).foundersYetToEndorse,
+      5,
+      'endosso e contado dentro de uma praca so',
+    );
+  });
+
+  test('fundadora suspensa nao conta como endosso disponivel', () => {
+    const comUmaSuspensa = network.founders.map((store, index) =>
+      index === 5 ? { ...store, status: StoreStatus.SUSPENDED } : store,
+    );
+    const tally = endorsementTally(pendingApplication(), comUmaSuspensa);
+
+    assert.equal(tally.foundersYetToEndorse, 4, 'nao adianta contar quem nao pode endossar');
+    assert.equal(tally.reachable, true);
+  });
+
+  test('praca pequena demais deixa a candidatura inalcancavel — e diz isso na hora', () => {
+    // Tres fundadoras, e uma delas e a padrinho: sobram duas para dar tres
+    // endossos. Sem este sinal, a unica noticia seria a caducidade 30 dias
+    // depois, sem ninguem saber que nunca houve chance.
+    const minuscula = buildFoundingNetwork(3);
+    const candidatura = unwrap(
+      openApplication({
+        id: APPLICATION_ID,
+        candidate: buildStoreProfile({ tradeName: 'Nova Garagem', cnpj: '02558157000162' }),
+        sponsor: minuscula.founderAt(0),
+        now: NOW,
+      }),
+    ).state;
+
+    const tally = endorsementTally(candidatura, minuscula.founders);
+    assert.equal(tally.foundersYetToEndorse, 2);
+    assert.equal(tally.stillNeeded, 3);
+    assert.equal(tally.reachable, false);
   });
 
   test('candidatura credenciada nao aceita novo endosso', () => {
@@ -202,26 +287,63 @@ describe('retirada e credenciamento efetivo', () => {
     assert.equal(bySponsor.status, MembershipStatus.WITHDRAWN);
   });
 
-  test('credenciamento cria loja MEMBER (sem voto) vinculada ao padrinho', () => {
-    const { store } = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), NOW));
+  test('quem entra na janela de fundacao leva: a loja nasce FUNDADORA', () => {
+    const { store } = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), PRACA, NOW));
 
-    assert.equal(store.kind, StoreKind.MEMBER, 'quem entra depois nao vira fundador');
+    assert.equal(store.kind, StoreKind.FOUNDER, 'a janela ainda estava aberta');
     assert.equal(store.status, StoreStatus.ACTIVE);
     assert.equal(store.sponsorStoreId, network.founderAt(0).id);
     assert.equal(store.profile.tradeName, 'Nova Garagem');
   });
 
+  test('fechada a janela, a mesma candidatura vira MEMBER', () => {
+    // Mesmos endossos, mesma candidata, mesmo instante: o que muda e so a
+    // praca. E o unico eixo que decide fundadora ou membro.
+    const { store } = unwrap(
+      admitApprovedStore(admitida(), asStoreId('str_new'), PRACA_FECHADA, NOW),
+    );
+
+    assert.equal(store.kind, StoreKind.MEMBER);
+  });
+
+  test('o instante exato do fim ja esta fora da janela', () => {
+    // O limite tem de cair de um lado so: duas lojas credenciadas no mesmo
+    // milissegundo nao podem receber condicoes diferentes por ordem de gravacao.
+    const noLimite = buildCluster({ foundingWindowEndsAt: NOW });
+    const { store } = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), noLimite, NOW));
+
+    assert.equal(store.kind, StoreKind.MEMBER);
+  });
+
+  test('nao ha campo dizendo por que a loja e fundadora: da para reconstruir', () => {
+    const { store } = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), PRACA, NOW));
+
+    assert.equal(
+      store.joinedAt < PRACA.foundingWindowEndsAt,
+      store.kind === StoreKind.FOUNDER,
+      'joinedAt contra a janela responde sozinho — um segundo registro so divergiria',
+    );
+  });
+
   test('candidatura nao aprovada nao vira loja', () => {
-    const result = admitApprovedStore(pendingApplication(), asStoreId('str_new'), NOW);
+    const result = admitApprovedStore(pendingApplication(), asStoreId('str_new'), PRACA, NOW);
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'APPLICATION_NOT_APPROVED');
   });
 
   test('credenciar duas vezes a mesma candidatura e bloqueado', () => {
-    const first = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), NOW));
-    const second = admitApprovedStore(first.application, asStoreId('str_other'), NOW);
+    const first = unwrap(admitApprovedStore(admitida(), asStoreId('str_new'), PRACA, NOW));
+    const second = admitApprovedStore(first.application, asStoreId('str_other'), PRACA, NOW);
     assert.equal(second.ok, false);
     assert.equal(second.ok === false && second.error.code, 'STORE_ALREADY_ADMITTED');
+  });
+
+  test('candidatura de uma praca nao e credenciada em outra', () => {
+    const outraPraca = buildCluster({ id: asClusterId('clu_outra') });
+    const result = admitApprovedStore(admitida(), asStoreId('str_new'), outraPraca, NOW);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.error.code, 'CROSS_CLUSTER');
   });
 });
 

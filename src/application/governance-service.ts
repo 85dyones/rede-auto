@@ -1,17 +1,26 @@
 /**
  * Casos de uso de credenciamento.
  *
- * A aprovacao pelo quorum e a criacao efetiva da loja acontecem no mesmo caso
- * de uso, mas por funcoes separadas do dominio: aprovar e ato de governanca,
- * credenciar e ato de provisionamento. Se a criacao da loja falhar (CNPJ
- * duplicado, por exemplo), a decisao dos fundadores permanece registrada e o
- * provisionamento pode ser repetido sem nova votacao.
+ * O credenciamento pelos endossos e a criacao efetiva da loja acontecem no
+ * mesmo caso de uso, mas por funcoes separadas do dominio: credenciar e ato de
+ * governanca, provisionar e ato de infraestrutura. Se a criacao da loja falhar
+ * (CNPJ duplicado, por exemplo), os endossos permanecem registrados e o
+ * provisionamento pode ser repetido sem novo aval.
+ *
+ * E aqui que o numero de fundadoras vira fato: toda apuracao passa por
+ * `founderRoll`, que pergunta ao repositorio. O dominio nao tem — e nao deveria
+ * ter — um `founderCount` para consultar.
  */
 
 import { type Result, err, ok } from '../domain/shared/result.ts';
 import type { DomainError } from '../domain/shared/errors.ts';
 import { conflictError } from '../domain/shared/errors.ts';
-import { asApplicationId, asStoreId, type ApplicationId } from '../domain/shared/ids.ts';
+import {
+  asApplicationId,
+  asStoreId,
+  type ApplicationId,
+  type ClusterId,
+} from '../domain/shared/ids.ts';
 import { domainEvent } from '../domain/shared/events.ts';
 import { type Store, parseStoreProfile } from '../domain/network/store.ts';
 import {
@@ -26,6 +35,14 @@ import {
 } from '../domain/network/membership.ts';
 import { type Actor, type AppContext, publish } from './context.ts';
 import { applicationNotFound } from './errors.ts';
+
+/**
+ * As fundadoras que a praca tem de fato, no instante da consulta. Uma linha, e
+ * nao uma constante, porque a janela de fundacao deixa esse numero variavel por
+ * construcao: fecha com dez, ou com sete, conforme quem entrou a tempo.
+ */
+const founderRoll = (context: AppContext, clusterId: ClusterId): Promise<Store[]> =>
+  context.repos.stores.founders(clusterId);
 
 export type ApplicationView = {
   readonly application: MembershipApplication;
@@ -61,9 +78,15 @@ export async function submitApplication(
 
   await context.repos.memberships.save(transition.value.state);
   await publish(context, transition.value.events, actor);
+
+  const application = transition.value.state;
   return ok({
-    application: transition.value.state,
-    tally: endorsementTally(transition.value.state, context.policies.governance),
+    application,
+    tally: endorsementTally(
+      application,
+      await founderRoll(context, application.clusterId),
+      context.policies.governance,
+    ),
     admittedStore: null,
   });
 }
@@ -98,7 +121,13 @@ export async function endorseApplication(
 
   return ok({
     application: admitted?.application ?? decided,
-    tally: endorsementTally(decided, context.policies.governance),
+    // Apurado DEPOIS de admitir: se a candidata entrou como fundadora, ela ja
+    // conta no rol e o numero na tela e o da praca de agora, nao o de antes.
+    tally: endorsementTally(
+      decided,
+      await founderRoll(context, decided.clusterId),
+      context.policies.governance,
+    ),
     admittedStore: admitted?.store ?? null,
   });
 }
@@ -107,9 +136,15 @@ async function admit(
   context: AppContext,
   application: MembershipApplication,
 ): Promise<{ store: Store; application: MembershipApplication } | null> {
+  // A praca decide se a loja nasce fundadora ou membro: e ela que sabe quando a
+  // janela de fundacao fecha. Sem cluster nao ha como credenciar.
+  const cluster = await context.repos.clusters.byId(application.clusterId);
+  if (cluster === undefined) return null;
+
   const result = admitApprovedStore(
     application,
     asStoreId(context.ids.next('str')),
+    cluster,
     context.clock.now(),
   );
   if (!result.ok) return null;
@@ -122,6 +157,9 @@ async function admit(
       applicationId: application.id,
       tradeName: result.value.store.profile.tradeName,
       sponsorStoreId: result.value.store.sponsorStoreId,
+      // `kind` sozinho: gravar tambem "entrou na janela" seria o mesmo fato
+      // duas vezes, e a copia so serve para divergir do original.
+      kind: result.value.store.kind,
     }),
   ]);
 
@@ -145,9 +183,15 @@ export async function retireApplication(
 
   await context.repos.memberships.save(transition.value.state);
   await publish(context, transition.value.events, actor);
+
+  const withdrawn = transition.value.state;
   return ok({
-    application: transition.value.state,
-    tally: endorsementTally(transition.value.state, context.policies.governance),
+    application: withdrawn,
+    tally: endorsementTally(
+      withdrawn,
+      await founderRoll(context, withdrawn.clusterId),
+      context.policies.governance,
+    ),
     admittedStore: null,
   });
 }
@@ -166,7 +210,11 @@ export async function viewApplication(
 
   return ok({
     application,
-    tally: endorsementTally(application, context.policies.governance),
+    tally: endorsementTally(
+      application,
+      await founderRoll(context, application.clusterId),
+      context.policies.governance,
+    ),
     admittedStore,
   });
 }
