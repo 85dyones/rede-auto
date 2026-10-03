@@ -1008,7 +1008,7 @@ Quem recebe o quê:
 | `custody.discrepancies_found` | origem e destino | ALERT |
 | `feed.duplicate_vin_detected` | as duas lojas envolvidas | ALERT |
 | `feed.vehicle_missing` (com terceiro) | proprietária e custodiante | ACTION_REQUIRED |
-| `membership.application_opened` | fundadoras, menos a padrinho | ACTION_REQUIRED |
+| `membership.application_opened` | fundadoras, menos a padrinho — nenhum pátio dela | ACTION_REQUIRED |
 | `network.member_admitted` | toda a rede | INFO |
 
 `lock.opened`, `lock.extended` e as mudanças de preço **não** notificam: virariam

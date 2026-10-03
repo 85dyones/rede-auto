@@ -6,7 +6,7 @@ import { domainEvent } from '../domain/shared/events.ts';
 import { buildApplication, type Application } from '../bootstrap.ts';
 import { loadConfig } from '../config.ts';
 import { FakeClock, HOUR } from '../domain/shared/clock.ts';
-import { sequentialIdGenerator } from '../domain/shared/ids.ts';
+import { asStoreId, sequentialIdGenerator, type StoreId } from '../domain/shared/ids.ts';
 import { seededActor } from '../infra/seed.ts';
 import { fromReais } from '../domain/shared/money.ts';
 import {
@@ -76,12 +76,16 @@ describe('mapa de eventos para avisos', () => {
       domainEvent('membership.application_opened', 'app_1', T0, {
         clusterId: 'clu_test',
         candidateTradeName: 'Nova Garagem',
-        sponsorStoreId: 'str_a',
+        sponsorMemberId: 'mbr_a',
       }),
     );
     assert.equal(aviso?.broadcast?.foundersOnly, true);
     assert.equal(aviso?.broadcast?.clusterId, 'clu_test', 'broadcast sem praca nao entrega a ninguem');
-    assert.deepEqual(aviso?.except, ['str_a'], 'quem apresentou nao precisa ser avisado');
+    assert.deepEqual(
+      aviso?.broadcast?.exceptMembers,
+      ['mbr_a'],
+      'a padrinho e uma empresa: nenhum patio dela e chamado a endossar',
+    );
   });
 
   test('carro novo no feed vai a praca, menos a propria loja que publicou', () => {
@@ -289,10 +293,21 @@ describe('entrega das notificacoes', () => {
    * `previewNotification` passavam com tres destes avisos chegando a ninguem:
    * conferiam `except`, e nao havia nem `to` nem `broadcast` para onde entregar.
    */
-  const avisosDe = async (app: Application, loja: Actor, tipo: string) =>
-    (await app.context.repos.notifications.forStore({ storeId: loja.store.id })).filter(
+  /**
+   * A entrega roda depois da transacao (`void deliver(...)` no assinante), e o
+   * broadcast ainda consulta lojas e fundadoras antes de gravar. Ler o mural
+   * logo depois do caso de uso pode chegar antes do aviso — espera a fila de
+   * microtarefas esvaziar, que com os repositorios em memoria e tudo o que falta.
+   */
+  const entregasPendentes = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  const avisosDe = async (app: Application, loja: Actor | StoreId, tipo: string) => {
+    await entregasPendentes();
+    const storeId = typeof loja === 'string' ? loja : loja.store.id;
+    return (await app.context.repos.notifications.forStore({ storeId })).filter(
       (aviso) => aviso.eventType === tipo,
     );
+  };
 
   const carroAprovado = (app: Application, loja: Actor) =>
     registerVehicle(app.context, loja, {
@@ -359,21 +374,47 @@ describe('entrega das notificacoes', () => {
     await app.stop();
   });
 
+  const novaGaragem = {
+    legalName: 'Nova Garagem Veiculos LTDA',
+    tradeName: 'Nova Garagem',
+    cnpj: '07.526.557/0001-00',
+    city: 'Curitiba',
+    state: 'PR',
+    phone: '(41) 99876-5432',
+    email: 'contato@novagaragem.com.br',
+    responsibleName: 'Joao Pereira',
+    yard: { lat: -25.5307, lng: -49.2064 },
+  };
+
+  test('candidatura nao pede endosso a padrinho, nem pela filial', async () => {
+    // O endosso e da empresa, e a padrinho nao endossa a propria indicacao por
+    // nenhum dos patios dela. O aviso que pede o endosso tambem nao vai a eles.
+    // O teste de rascunho passava montando o payload com `sponsorStoreId`, que
+    // o evento real deixou de carregar quando empresa e loja se separaram.
+    const { app, lojaA, lojaB } = await cenario();
+    const filial = asStoreId('str_prime_boqueirao');
+    const patioDaFilial = await app.context.repos.stores.byId(filial);
+    assert.equal(patioDaFilial?.memberId, lojaA.member.id, 'sem filial o teste passaria a toa');
+
+    unwrap(await submitApplication(app.context, lojaA, novaGaragem));
+
+    assert.equal((await avisosDe(app, lojaB, 'membership.application_opened')).length, 1);
+    assert.equal(
+      (await avisosDe(app, lojaA, 'membership.application_opened')).length,
+      0,
+      'quem apresentou nao e chamada a endossar',
+    );
+    assert.equal(
+      (await avisosDe(app, filial, 'membership.application_opened')).length,
+      0,
+      'nem pela filial',
+    );
+    await app.stop();
+  });
+
   test('loja credenciada e anunciada a rede, pelo nome fantasia', async () => {
     const { app, lojaA, lojaB } = await cenario();
-    const candidatura = unwrap(
-      await submitApplication(app.context, lojaA, {
-        legalName: 'Nova Garagem Veiculos LTDA',
-        tradeName: 'Nova Garagem',
-        cnpj: '07.526.557/0001-00',
-        city: 'Curitiba',
-        state: 'PR',
-        phone: '(41) 99876-5432',
-        email: 'contato@novagaragem.com.br',
-        responsibleName: 'Joao Pereira',
-        yard: { lat: -25.5307, lng: -49.2064 },
-      }),
-    );
+    const candidatura = unwrap(await submitApplication(app.context, lojaA, novaGaragem));
     for (const indice of [1, 2, 3]) {
       unwrap(
         await endorseApplication(

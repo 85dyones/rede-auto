@@ -70,7 +70,7 @@ declarado de 60 km.
 | Auth | chave de API em memória | adaptador de desenvolvimento; ver §8 |
 | PDF | gerador próprio (`src/infra/pdf/`) | sem biblioteca |
 | XML (feeds) | parser próprio (`src/infra/feeds/xml.ts`) | sem biblioteca, DOCTYPE rejeitado |
-| Testes | `node:test` | 583 testes, 24 arquivos |
+| Testes | `node:test` | 584 testes, 24 arquivos |
 | Frontend | **não existe** | ver §7 |
 
 **Zero dependências de runtime é decisão, não acidente**
@@ -83,7 +83,7 @@ explícita, o que o type-stripping exige.
 
 ```bash
 npm install          # 3 pacotes, todos de dev
-npm run check        # typecheck estrito + 583 testes (~3 s)
+npm run check        # typecheck estrito + 584 testes (~3 s)
 npm run demo         # 20 atos narrados, a operação inteira em relógio simulado
 npm start            # API em :3000, rede semeada, chaves no console
 npm run test:watch   # testes em watch
@@ -137,7 +137,7 @@ src/
 scripts/demo.ts  os 20 atos
 ```
 
-**20.865 linhas de produção, 9.061 de teste.**
+**20.885 linhas de produção, 9.102 de teste.**
 
 ### As cinco regras estruturais
 
@@ -704,10 +704,10 @@ descartado, e o que uma mutação provou. O diff já conta o quê.
 
 | | |
 |---|---|
-| Testes | **583**, todos passando |
+| Testes | **584**, todos passando |
 | Typecheck | estrito, sem erros |
-| Linhas de produção | 20.865 |
-| Linhas de teste | 9.061 |
+| Linhas de produção | 20.885 |
+| Linhas de teste | 9.102 |
 | Arquivos TypeScript | 94 (24 de teste) |
 | Rotas HTTP | 68 |
 | Eventos de domínio | 73 tipos em 11 prefixos |

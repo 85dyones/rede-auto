@@ -14,7 +14,7 @@
 import { type DomainEvent } from '../domain/shared/events.ts';
 import type { Instant } from '../domain/shared/clock.ts';
 import { formatDuration } from '../domain/shared/clock.ts';
-import type { ClusterId, StoreId } from '../domain/shared/ids.ts';
+import type { ClusterId, MemberId, StoreId } from '../domain/shared/ids.ts';
 import type { Store } from '../domain/network/store.ts';
 import { StoreStatus } from '../domain/network/store.ts';
 import { CommercialStatus } from '../domain/vehicle/vehicle.ts';
@@ -74,7 +74,16 @@ type Draft = DraftText &
          * mandaria aviso de estoque de Curitiba para uma loja de outra cidade.
          * Exigir no tipo obriga o evento a carregar a praça no payload.
          */
-        readonly broadcast: { readonly clusterId: ClusterId; readonly foundersOnly?: boolean };
+        readonly broadcast: {
+          readonly clusterId: ClusterId;
+          readonly foundersOnly?: boolean;
+          /**
+           * Empresas que nao recebem, por nenhum dos patios. Existe porque ha
+           * avisos sobre a EMPRESA: o que pede endosso nao vai a padrinho, e a
+           * regra e "nem pela filial". Excluir um patio deixaria os outros.
+           */
+          readonly exceptMembers?: readonly (MemberId | null | undefined)[];
+        };
         readonly to?: never;
       }
   );
@@ -258,8 +267,14 @@ function draftFor(event: DomainEvent): Draft | null {
         severity: NotificationSeverity.ACTION_REQUIRED,
         title: 'Nova candidatura para credenciamento',
         body: `${text('candidateTradeName')} foi apresentada à rede e aguarda o aval dos fundadores.`,
-        broadcast: { clusterId: cluster(), foundersOnly: true },
-        except: [store('sponsorStoreId')],
+        // A padrinho e uma empresa: o evento carrega `sponsorMemberId` desde que
+        // empresa e loja se separaram, e excluir por patio deixava a candidatura
+        // pedir endosso a quem a apresentou.
+        broadcast: {
+          clusterId: cluster(),
+          foundersOnly: true,
+          exceptMembers: [payload['sponsorMemberId'] as MemberId | undefined],
+        },
       };
 
     case 'network.member_admitted':
@@ -333,9 +348,14 @@ async function resolveTargets(context: AppContext, draft: Draft): Promise<StoreI
     ? new Set((await context.repos.members.founders(broadcast.clusterId)).map((m) => m.id))
     : null;
 
+  const excludedMembers = new Set(
+    (broadcast.exceptMembers ?? []).filter((id): id is MemberId => id !== undefined && id !== null),
+  );
+
   return stores
     .filter((store: Store) => store.status === StoreStatus.ACTIVE)
     .filter((store: Store) => foundingMemberIds === null || foundingMemberIds.has(store.memberId))
+    .filter((store: Store) => !excludedMembers.has(store.memberId))
     .map((store: Store) => store.id)
     .filter((id) => !excluded.has(id));
 }
