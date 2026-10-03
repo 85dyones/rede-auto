@@ -1,7 +1,7 @@
 # Handoff de frontend — rede-auto
 
 **Para:** Claude Design · **De:** time de backend · **Status:** API implementada e
-testada (575 testes), frontend inexistente.
+testada (583 testes), frontend inexistente.
 
 Este documento é o briefing para a proposta visual. Tudo aqui está ancorado no
 contrato real da API — os JSON citados são respostas de verdade, capturadas do

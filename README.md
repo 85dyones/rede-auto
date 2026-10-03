@@ -24,7 +24,7 @@ se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
 npm install
 npm start        # sobe a API em http://localhost:3000 com a rede semeada
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 575 testes
+npm run check    # typecheck estrito + 583 testes
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
