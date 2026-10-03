@@ -136,7 +136,13 @@ export type LockRepository = {
   save(lock: CommercialLock): Promise<void>;
   byId(id: LockId): Promise<CommercialLock | undefined>;
   activeByVehicle(vehicleId: VehicleId): Promise<CommercialLock | undefined>;
-  /** Travas ainda marcadas ACTIVE cujo prazo ja passou. Alimenta o varredor. */
+  /**
+   * Candidatas a expirar: ACTIVE com o prazo NOMINAL vencido. Alimenta o
+   * varredor, e e um superconjunto de proposito — com o relogio parado
+   * (carro a caminho de quem travou) o prazo que vale e maior que o nominal, e
+   * quem decide e `expireLockIfDue`. Filtrar aqui exigiria a politica da trava
+   * dentro do repositorio, e a regra passaria a viver em dois lugares.
+   */
   dueForExpiry(now: Instant): Promise<CommercialLock[]>;
   historyByVehicle(vehicleId: VehicleId): Promise<CommercialLock[]>;
 };

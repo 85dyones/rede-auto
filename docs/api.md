@@ -479,6 +479,12 @@ final; quem responde por esse relacionamento (CDC) é a Loja B.
 `409 VEHICLE_ALREADY_LOCKED` se já houver trava — **inclusive para a loja
 proprietária**.
 
+Com o carro a caminho de quem travou, o relógio da trava para:
+`trava.relogioParadoDesde` vem preenchido, `restante` não anda e `expiraEm`
+acompanha o relógio de parede — não desenhe contagem regressiva nesse estado. O
+relógio volta a correr na chegada, ou sozinho depois de 24 h parado; o teto de
+5 dias, contado da abertura, vale o tempo todo.
+
 ### `POST /api/v1/travas/:id/extensoes`
 
 ```jsonc

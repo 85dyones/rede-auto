@@ -48,6 +48,7 @@ const vendedorC = buildUser(lojaC.id);
 const gerenteA = buildUser(lojaA.id);
 
 const T0 = Date.parse('2026-08-24T13:00:00Z');
+const politica = DEFAULT_LOCK_POLICY;
 
 function availableVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
   return buildVehicle({ ownerStoreId: lojaA.id, createdAt: T0, ...overrides });
@@ -214,14 +215,18 @@ describe('abertura da trava', () => {
 describe('expiracao por decurso de prazo', () => {
   test('segue ativa ate o ultimo instante e expira exatamente no vencimento', () => {
     const { lock } = lockedByB(availableVehicle());
-    assert.equal(isActive(lock, T0 + 4 * HOUR - 1), true);
-    assert.equal(isActive(lock, T0 + 4 * HOUR), false, 'no instante do vencimento ja esta expirada');
-    assert.equal(remainingMs(lock, T0 + HOUR), 3 * HOUR);
+    assert.equal(isActive(lock, T0 + 4 * HOUR - 1, politica), true);
+    assert.equal(
+      isActive(lock, T0 + 4 * HOUR, politica),
+      false,
+      'no instante do vencimento ja esta expirada',
+    );
+    assert.equal(remainingMs(lock, T0 + HOUR, politica), 3 * HOUR);
   });
 
   test('ao expirar, o veiculo volta a ficar disponivel para toda a rede', () => {
     const locked = lockedByB(availableVehicle());
-    const { state, events } = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR));
+    const { state, events } = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica));
 
     assert.equal(state.lock.status, LockStatus.EXPIRED);
     assert.equal(state.vehicle.commercialStatus, CommercialStatus.AVAILABLE);
@@ -235,7 +240,7 @@ describe('expiracao por decurso de prazo', () => {
     // avancado. O cliente desistiu, a trava caiu — e nao ha frete de devolucao.
     const noPatioDaB = atYardOf(availableVehicle(), lojaB.id, T0 - DAY);
     const locked = lockedByB(noPatioDaB);
-    const { state, events } = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR));
+    const { state, events } = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica));
 
     assert.equal(state.vehicle.commercialStatus, CommercialStatus.AVAILABLE, 'livre para a rede');
     assert.equal(state.vehicle.physical.custodianStoreId, lojaB.id, 'segue no patio da Loja B');
@@ -250,7 +255,7 @@ describe('expiracao por decurso de prazo', () => {
     // O carro esta no patio da Loja B: para ela, virou oportunidade de balcao.
     const noPatioDaB = atYardOf(availableVehicle(), lojaB.id);
     const locked = lockedByB(noPatioDaB);
-    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR)).state;
+    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica)).state;
 
     const reopenedByB = openLock({
       lockId: asLockId('lck_re'),
@@ -275,8 +280,8 @@ describe('expiracao por decurso de prazo', () => {
 
   test('expirar e idempotente: varredor e leitura podem chamar a vontade', () => {
     const locked = lockedByB(availableVehicle());
-    const first = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 5 * HOUR));
-    const second = unwrap(expireLockIfDue(first.state.vehicle, first.state.lock, T0 + 6 * HOUR));
+    const first = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 5 * HOUR, politica));
+    const second = unwrap(expireLockIfDue(first.state.vehicle, first.state.lock, T0 + 6 * HOUR, politica));
 
     assert.equal(second.events.length, 0, 'a segunda chamada nao emite eventos');
     assert.equal(second.state.lock.endedAt, T0 + 5 * HOUR, 'mantem o instante do primeiro encerramento');
@@ -284,7 +289,7 @@ describe('expiracao por decurso de prazo', () => {
 
   test('antes do vencimento, nada acontece', () => {
     const locked = lockedByB(availableVehicle());
-    const result = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 3 * HOUR));
+    const result = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 3 * HOUR, politica));
     assert.equal(result.state.lock.status, LockStatus.ACTIVE);
     assert.equal(result.events.length, 0);
   });
@@ -292,14 +297,14 @@ describe('expiracao por decurso de prazo', () => {
   test('laudo que venceu durante a trava impede a volta ao catalogo', () => {
     const vehicle = availableVehicle({ inspection: buildApprovedInspection(T0, { expiresAt: T0 + 2 * HOUR }) });
     const locked = lockedByB(vehicle);
-    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR)).state;
+    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica)).state;
 
     assert.equal(expired.vehicle.commercialStatus, CommercialStatus.DRAFT);
   });
 
   test('carro removido do feed do dono e parado no patio dele sai da rede', () => {
     const locked = lockedByB(availableVehicle({ missingFromFeed: true }));
-    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR)).state;
+    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica)).state;
     assert.equal(expired.vehicle.commercialStatus, CommercialStatus.WITHDRAWN);
   });
 
@@ -307,7 +312,7 @@ describe('expiracao por decurso de prazo', () => {
     // Retirar da rede sozinho aqui seria decidir logistica por conta propria:
     // o carro esta com terceiro e alguem precisa combinar o retorno.
     const locked = lockedByB(atYardOf(availableVehicle({ missingFromFeed: true }), lojaB.id));
-    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR)).state;
+    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica)).state;
 
     assert.equal(expired.vehicle.commercialStatus, CommercialStatus.AVAILABLE);
     assert.equal(expired.vehicle.missingFromFeed, true);
@@ -483,7 +488,7 @@ describe('preco liquido durante a trava', () => {
     assert.equal(locked.lock.netPriceSnapshot.cents, fromReais(85_000).cents);
 
     const expired = unwrap(
-      expireLockIfDue(reprecificado.state, locked.lock, T0 + 4 * HOUR),
+      expireLockIfDue(reprecificado.state, locked.lock, T0 + 4 * HOUR, politica),
     ).state;
     assert.equal(expired.vehicle.pricing.netPrice.cents, fromReais(89_000).cents, 'passa a valer no fim da trava');
     assert.equal(expired.vehicle.pendingNetPrice, null);
@@ -555,6 +560,7 @@ describe('liberacao antecipada e conversao em venda', () => {
         lock: locked.lock,
         dealId: asDealId('dea_0001'),
         now: T0 + 2 * HOUR,
+        policy: politica,
       }),
     ).state;
 
@@ -571,6 +577,7 @@ describe('liberacao antecipada e conversao em venda', () => {
       lock: locked.lock,
       dealId: asDealId('dea_0002'),
       now: T0 + 5 * HOUR,
+      policy: politica,
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.error.code, 'LOCK_NOT_ACTIVE');
@@ -578,7 +585,7 @@ describe('liberacao antecipada e conversao em venda', () => {
 
   test('liberar uma trava ja encerrada e inofensivo', () => {
     const locked = lockedByB(availableVehicle());
-    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR)).state;
+    const expired = unwrap(expireLockIfDue(locked.vehicle, locked.lock, T0 + 4 * HOUR, politica)).state;
     const result = unwrap(
       releaseLock({
         vehicle: expired.vehicle,
@@ -600,7 +607,7 @@ describe('liberacao antecipada e conversao em venda', () => {
 describe('relogio parado durante o transito', () => {
   test('sair rumo a quem travou para o relogio', () => {
     const { lock } = lockedByB(availableVehicle());
-    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + 10 * 60_000)).state;
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + 10 * 60_000, politica)).state;
 
     assert.equal(isSuspended(parado), true);
     assert.equal(parado.suspendedAt, T0 + 10 * 60_000);
@@ -610,7 +617,7 @@ describe('relogio parado durante o transito', () => {
     // A Loja B travou; o carro vai para a Loja C. O atendimento da B nao e
     // afetado — ela pode estar vendendo sem nunca ver o carro.
     const { lock } = lockedByB(availableVehicle());
-    const transicao = unwrap(suspendForTransit(lock, asStoreId('str_terceira'), T0 + 10 * 60_000));
+    const transicao = unwrap(suspendForTransit(lock, asStoreId('str_terceira'), T0 + 10 * 60_000, politica));
 
     assert.equal(transicao.events.length, 0, 'nada acontece');
     assert.equal(isSuspended(transicao.state), false);
@@ -619,16 +626,16 @@ describe('relogio parado durante o transito', () => {
   test('a trava parada nao vence, mesmo passado o prazo original', () => {
     // Sem isto o varredor expiraria a trava com o carro ainda no caminho.
     const { lock } = lockedByB(availableVehicle());
-    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR)).state;
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR, politica)).state;
 
-    assert.equal(isActive(parado, T0 + 9 * HOUR), true, 'relogio parado nao corre');
+    assert.equal(isActive(parado, T0 + 9 * HOUR, politica), true, 'relogio parado nao corre');
   });
 
   test('chegar devolve exatamente o tempo de viagem', () => {
     const { lock } = lockedByB(availableVehicle());
     const prazoOriginal = lock.expiresAt;
 
-    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR)).state;
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR, politica)).state;
     const voltou = unwrap(resumeAfterTransit(parado, T0 + 3 * HOUR)).state;
 
     assert.equal(isSuspended(voltou), false);
@@ -642,7 +649,7 @@ describe('relogio parado durante o transito', () => {
     const { lock } = lockedByB(availableVehicle());
     const prazoOriginal = lock.expiresAt;
 
-    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR)).state;
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR, politica)).state;
     const voltou = unwrap(resumeAfterTransit(parado, T0 + HOUR + 3 * DAY)).state;
 
     assert.equal(
@@ -660,13 +667,71 @@ describe('relogio parado durante o transito', () => {
       expiresAt: T0 + DEFAULT_LOCK_POLICY.maxTotalMs - HOUR,
     };
 
-    const parado = unwrap(suspendForTransit(quaseNoTeto, lojaB.id, T0 + HOUR)).state;
+    const parado = unwrap(suspendForTransit(quaseNoTeto, lojaB.id, T0 + HOUR, politica)).state;
     const voltou = unwrap(resumeAfterTransit(parado, T0 + 20 * HOUR)).state;
 
     assert.equal(
       voltou.expiresAt,
       T0 + DEFAULT_LOCK_POLICY.maxTotalMs,
       'o teto da abertura corta o que a suspensao devolveria',
+    );
+  });
+
+  /*
+   * Os tres testes abaixo cobrem quem DECIDE a expiracao: `expireLockIfDue`,
+   * chamada pelo varredor e por toda leitura do veiculo. O teste de `isActive`
+   * acima passava enquanto o varredor expirava a trava no meio da viagem.
+   */
+  test('o varredor nao expira a trava parada, mesmo passado o prazo original', () => {
+    const locked = lockedByB(availableVehicle());
+    const parado = unwrap(suspendForTransit(locked.lock, lojaB.id, T0 + HOUR, politica)).state;
+
+    const varredura = unwrap(expireLockIfDue(locked.vehicle, parado, T0 + 9 * HOUR, politica));
+
+    assert.equal(varredura.events.length, 0, 'nada a expirar');
+    assert.equal(varredura.state.lock.status, LockStatus.ACTIVE);
+    assert.equal(varredura.state.vehicle.commercialStatus, CommercialStatus.LOCKED);
+  });
+
+  test('carro perdido no caminho: a trava vence no prazo original mais o teto de transito', () => {
+    // O teto de transito so era aplicado na chegada. Carro que nunca chega
+    // nunca retomava — e a trava ficava ativa para sempre, acima ate dos 5 dias.
+    const locked = lockedByB(availableVehicle());
+    const parado = unwrap(suspendForTransit(locked.lock, lojaB.id, T0 + HOUR, politica)).state;
+    const vence = locked.lock.expiresAt + DEFAULT_LOCK_POLICY.maxTransitSuspensionMs;
+
+    assert.equal(isActive(parado, vence - 1, politica), true);
+    assert.equal(isActive(parado, vence, politica), false, 'passadas 24h parada, o relogio volta a correr');
+
+    const varredura = unwrap(expireLockIfDue(locked.vehicle, parado, vence, politica));
+    assert.equal(varredura.state.lock.status, LockStatus.EXPIRED);
+    assert.equal(varredura.state.vehicle.commercialStatus, CommercialStatus.AVAILABLE);
+    assert.equal(varredura.events[0]?.type, 'lock.expired');
+  });
+
+  test('o teto absoluto vale com o relogio parado, sem esperar o carro chegar', () => {
+    const locked = lockedByB(availableVehicle());
+    const quaseNoTeto: CommercialLock = {
+      ...locked.lock,
+      expiresAt: T0 + DEFAULT_LOCK_POLICY.maxTotalMs - HOUR,
+    };
+    const parado = unwrap(suspendForTransit(quaseNoTeto, lojaB.id, T0 + HOUR, politica)).state;
+
+    assert.equal(isActive(parado, T0 + DEFAULT_LOCK_POLICY.maxTotalMs - 1, politica), true);
+    assert.equal(isActive(parado, T0 + DEFAULT_LOCK_POLICY.maxTotalMs, politica), false);
+  });
+
+  test('com o relogio parado, o tempo restante fica congelado', () => {
+    // E o numero que a parceira ve na tela. Com o relogio parado ele nao anda —
+    // e nao pode ficar negativo depois do prazo nominal.
+    const { lock } = lockedByB(availableVehicle());
+    const parado = unwrap(suspendForTransit(lock, lojaB.id, T0 + HOUR, politica)).state;
+
+    assert.equal(remainingMs(parado, T0 + HOUR, politica), 3 * HOUR);
+    assert.equal(
+      remainingMs(parado, T0 + 6 * HOUR, politica),
+      3 * HOUR,
+      'cinco horas de viagem, nada consumido',
     );
   });
 

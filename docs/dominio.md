@@ -267,8 +267,13 @@ Dois tetos cortam, e os dois precisam existir:
 | `maxTransitSuspensionMs` (24 h) | carro perdido no caminho segurar o veículo fora do catálogo por dias |
 | `maxTotalMs` (5 dias, da **abertura**) | suspender virar um jeito de furar o teto absoluto |
 
-`isActive` devolve `true` para uma trava suspensa mesmo passado o `expiresAt`
-original — sem isso o varredor expiraria a trava no meio da viagem.
+Com o relógio parado, o prazo que vale é `effectiveExpiresAt`: o `expiresAt`
+mais o tempo parado, cortado pelos dois tetos. É a única resposta para "até
+quando esta trava vale" — varredor, leitura do veículo, prioridade do recall e o
+cronômetro da API passam por ela. Antes só `isActive` sabia do relógio parado, e
+respondia "ativa" sem prazo nenhum: o varredor comparava com o `expiresAt`
+nominal e expirava a trava no meio da viagem, e como os tetos só eram aplicados
+na chegada, carro que nunca chegava segurava a trava para sempre.
 
 Carro indo para qualquer loja **que não seja a detentora** não suspende nada: o
 atendimento dela não é afetado, e ela pode estar vendendo sem nunca ver o carro.

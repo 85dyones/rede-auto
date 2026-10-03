@@ -1383,3 +1383,62 @@ describe('postura de troca', () => {
     assert.equal(negociacao.body.erro.codigo, 'TRADE_IN_NOT_ACCEPTED');
   });
 });
+
+describe('trava com o carro a caminho de quem travou', () => {
+  test('o cronometro para, e a varredura nao derruba a trava no meio da viagem', async () => {
+    const criado = await api<{ id: string }>('POST', '/api/v1/veiculos', {
+      key: PRIME,
+      body: {
+        placa: 'JKL9M29',
+        chassi: '9BWZZZ377VT900009',
+        ficha: {
+          brand: 'Hyundai', model: 'HB20', version: '1.0 Comfort',
+          manufactureYear: 2022, modelYear: 2023, mileageKm: 31_200,
+          color: 'Branco', fuel: 'FLEX', transmission: 'MANUAL', doors: 4,
+        },
+        precoPublico: '72.900,00',
+        precoLiquidoRepasse: '66.000,00',
+        aceitaCarroNaTroca: true,
+        laudoCautelar: {
+          situacao: 'APPROVED', numero: 'LC-TRANSITO', empresa: 'Cautelar Brasil',
+          emitidoEm: '2026-08-01T12:00:00.000Z', validoAte: '2027-08-01T12:00:00.000Z',
+        },
+      },
+    });
+    const id = criado.body.id;
+
+    const trava = await api('POST', `/api/v1/veiculos/${id}/trava`, { key: VELOZ_VENDEDOR });
+    assert.equal(trava.status, 201);
+    const saida = await api('POST', `/api/v1/veiculos/${id}/custodia/saidas`, {
+      key: PRIME,
+      body: {
+        lojaDestinoId: 'str_veloz',
+        finalidade: 'TEST_DRIVE',
+        vistoria: vistoria(31_200),
+        responsavel,
+      },
+    });
+    assert.equal(saida.status, 201);
+
+    clock.advance(5 * HOUR);
+    await api('POST', '/api/v1/manutencao/varredura', { key: PRIME });
+
+    const visto = await api<{
+      comercial: { situacao: string };
+      trava: { restante: string; relogioParadoDesde: string | null } | null;
+    }>('GET', `/api/v1/veiculos/${id}`, { key: VELOZ });
+
+    assert.equal(visto.body.comercial.situacao, 'LOCKED');
+    assert.ok(visto.body.trava, 'a trava segue valendo com o carro na estrada');
+    assert.notEqual(visto.body.trava.relogioParadoDesde, null);
+    assert.equal(visto.body.trava.restante, '4h', 'cinco horas de viagem, nada consumido');
+
+    const historico = await api<{
+      travas: Array<{ situacao: string; restante: string; relogioParadoDesde: string | null }>;
+    }>('GET', `/api/v1/veiculos/${id}/travas`, { key: VELOZ });
+    const [atual] = historico.body.travas;
+    assert.equal(atual?.situacao, 'ACTIVE');
+    assert.equal(atual?.restante, '4h', 'o historico conta o mesmo restante que o catalogo');
+    assert.notEqual(atual?.relogioParadoDesde, null);
+  });
+});

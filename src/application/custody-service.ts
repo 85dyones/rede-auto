@@ -26,6 +26,7 @@ import {
 import { hasManagerPowers } from '../domain/network/store.ts';
 import {
   type CommercialLock,
+  lockForPriority,
   resumeAfterTransit,
   suspendForTransit,
 } from '../domain/lock/commercial-lock.ts';
@@ -42,7 +43,6 @@ import {
 } from '../domain/custody/custody.ts';
 import { type CustodyPeriod, attributeInfraction, buildCustodyLedger } from '../domain/custody/ledger.ts';
 import {
-  type ActiveLockView,
   type Recall,
   type RecallFulfilment,
   type RecallReason,
@@ -145,7 +145,7 @@ async function suspendLockForTransit(
   actor: Actor,
 ): Promise<void> {
   if (lock === null) return;
-  const transition = suspendForTransit(lock, toStoreId, context.clock.now());
+  const transition = suspendForTransit(lock, toStoreId, context.clock.now(), context.policies.lock);
   if (!transition.ok || transition.value.events.length === 0) return;
 
   await context.repos.locks.save(transition.value.state);
@@ -420,11 +420,7 @@ export async function requestVehicleRecall(
   const loaded = await loadVehicle(context, actor, input.vehicleId);
   if (!loaded.ok) return loaded;
 
-  const lock = loaded.value.lock;
-  const activeLock: ActiveLockView | null =
-    lock === null
-      ? null
-      : { lockId: lock.id, holderStoreId: lock.holderStoreId, expiresAt: lock.expiresAt };
+  const activeLock = lockForPriority(loaded.value.lock, context.clock.now(), context.policies.lock);
 
   const existing = await context.repos.recalls.openByVehicle(input.vehicleId);
 

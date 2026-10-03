@@ -30,7 +30,13 @@ import type { BillingStatement } from '../application/billing-service.ts';
 import { formatCnpj, formatPlate, maskPlate } from '../domain/shared/validation.ts';
 import type { MembershipApplication, EndorsementTally } from '../domain/network/membership.ts';
 import type { Vehicle } from '../domain/vehicle/vehicle.ts';
-import type { CommercialLock } from '../domain/lock/commercial-lock.ts';
+import {
+  type CommercialLock,
+  LockStatus,
+  effectiveExpiresAt,
+  remainingMs,
+} from '../domain/lock/commercial-lock.ts';
+import type { LockPolicy } from '../domain/lock/evidence.ts';
 import type { CustodyTransfer, InspectionTerm } from '../domain/custody/custody.ts';
 import type { CustodyPeriod } from '../domain/custody/ledger.ts';
 import type { Recall } from '../domain/recall/recall.ts';
@@ -170,17 +176,21 @@ export function vehicleDto(vehicle: Vehicle) {
   };
 }
 
-export function lockDto(lock: CommercialLock, at: Instant) {
-  const remaining = Math.max(0, lock.expiresAt - at);
+export function lockDto(lock: CommercialLock, at: Instant, policy: LockPolicy) {
+  const ativa = lock.status === LockStatus.ACTIVE;
+  const remaining = remainingMs(lock, at, policy);
   return {
     id: lock.id,
     veiculoId: lock.vehicleId,
     lojaDetentoraId: lock.holderStoreId,
     situacao: lock.status,
     abertaEm: instant(lock.openedAt),
-    expiraEm: instant(lock.expiresAt),
-    restanteMs: lock.status === 'ACTIVE' ? remaining : 0,
-    restante: lock.status === 'ACTIVE' ? formatDuration(remaining) : 'encerrada',
+    // Com o relogio parado o prazo anda junto com o relogio de parede; quem
+    // desenha o cronometro le `relogioParadoDesde` para saber que ele nao corre.
+    expiraEm: instant(ativa ? effectiveExpiresAt(lock, at, policy) : lock.expiresAt),
+    relogioParadoDesde: instant(ativa ? lock.suspendedAt : null),
+    restanteMs: ativa ? remaining : 0,
+    restante: ativa ? formatDuration(remaining) : 'encerrada',
     precoLiquidoTravado: money(lock.netPriceSnapshot),
     referenciaAtendimento: lock.customerReference,
     extensoes: lock.extensions.map((extension) => ({
@@ -204,6 +214,7 @@ export function vehicleViewDto(view: VehicleView, at: Instant) {
           id: view.lock.id,
           lojaDetentoraId: view.lock.holderStoreId,
           expiraEm: instant(view.lock.expiresAt),
+          relogioParadoDesde: instant(view.lock.clockStoppedSince),
           restante: formatDuration(view.lock.remainingMs),
           extensoes: view.lock.extensions,
         },

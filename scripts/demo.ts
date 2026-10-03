@@ -232,7 +232,7 @@ destaque(
 ato(`${lojaB.store.profile.tradeName} encontra o carro no catalogo da rede`);
 
 const encontrado = unwrap(await loadVehicle(context, lojaB, onixId));
-const visao = buildVehicleView(encontrado, lojaB.store.id, clock.now());
+const visao = buildVehicleView(encontrado, lojaB.store.id, clock.now(), context.policies.lock);
 diz(`${visao.vehicle.specs.brand} ${visao.vehicle.specs.model} ${visao.vehicle.specs.version} ${visao.vehicle.specs.modelYear}`);
 diz(`Preco publico da dona:  ${brl(visao.vehicle.pricing.publicPrice)}`);
 destaque(`Preco LIQUIDO de repasse: ${brl(visao.vehicle.pricing.netPrice)} — e o que a Loja A exige receber.`);

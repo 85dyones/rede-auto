@@ -43,13 +43,13 @@ import {
   type CommercialLock,
   expireLockIfDue,
   extendLock,
-  isActive,
+  lockForPriority,
   openLock,
   releaseLock,
   remainingMs,
 } from '../domain/lock/commercial-lock.ts';
-import type { Evidence } from '../domain/lock/evidence.ts';
-import { type ActiveLockView, resolvePriority, startSlaAfterLockRelease } from '../domain/recall/recall.ts';
+import type { Evidence, LockPolicy } from '../domain/lock/evidence.ts';
+import { resolvePriority, startSlaAfterLockRelease } from '../domain/recall/recall.ts';
 import type { VehicleQuery } from '../infra/persistence/repositories.ts';
 import { type Actor, type AppContext, publish } from './context.ts';
 import { noActiveLock, vehicleNotFound } from './errors.ts';
@@ -92,7 +92,7 @@ export async function reconcile(context: AppContext, vehicle: Vehicle): Promise<
   if (lock === undefined) return { vehicle, lock: null };
 
   const at = context.clock.now();
-  const transition = expireLockIfDue(vehicle, lock, at);
+  const transition = expireLockIfDue(vehicle, lock, at, context.policies.lock);
   if (!transition.ok) return { vehicle, lock };
 
   const { state, events } = transition.value;
@@ -400,7 +400,7 @@ export async function sweepExpiredLocks(context: AppContext): Promise<number> {
     const vehicle = await context.repos.vehicles.byId(asVehicleId(lock.vehicleId));
     if (vehicle === undefined) continue;
 
-    const transition = expireLockIfDue(vehicle, lock, at);
+    const transition = expireLockIfDue(vehicle, lock, at, context.policies.lock);
     if (!transition.ok || transition.value.events.length === 0) continue;
 
     const { state, events } = transition.value;
@@ -423,8 +423,11 @@ export type VehicleView = {
   readonly lock: {
     readonly id: LockId;
     readonly holderStoreId: StoreId;
+    /** Prazo efetivo: com o relogio parado, anda junto com o relogio de parede. */
     readonly expiresAt: Instant;
     readonly remainingMs: number;
+    /** O carro esta a caminho de quem travou, e o restante nao anda. */
+    readonly clockStoppedSince: Instant | null;
     readonly extensions: number;
   } | null;
   /** Estoque avancado: o carro esta no patio de uma loja que nao e a dona. */
@@ -442,12 +445,10 @@ export function buildVehicleView(
   loaded: LoadedVehicle,
   viewerStoreId: StoreId,
   at: Instant,
+  policy: LockPolicy,
 ): VehicleView {
   const { vehicle, lock } = loaded;
-  const activeLockView: ActiveLockView | null =
-    lock !== null && isActive(lock, at)
-      ? { lockId: lock.id, holderStoreId: lock.holderStoreId, expiresAt: lock.expiresAt }
-      : null;
+  const activeLockView = lockForPriority(lock, at, policy);
 
   const priority = resolvePriority(vehicle, activeLockView, at);
   const isOwner = vehicle.ownerStoreId === viewerStoreId;
@@ -461,8 +462,9 @@ export function buildVehicleView(
         : {
             id: lock.id,
             holderStoreId: lock.holderStoreId,
-            expiresAt: lock.expiresAt,
-            remainingMs: remainingMs(lock, at),
+            expiresAt: activeLockView.expiresAt,
+            remainingMs: remainingMs(lock, at, policy),
+            clockStoppedSince: lock.suspendedAt,
             extensions: lock.extensions.length,
           },
     onExtendedCustody: !custodianIsOwner,

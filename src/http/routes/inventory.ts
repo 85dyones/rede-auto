@@ -2,7 +2,7 @@
  * Rotas de estoque e de trava comercial — o catalogo compartilhado da rede.
  */
 
-import { asLockId, asVehicleId } from '../../domain/shared/ids.ts';
+import { asLockId, asVehicleId, type StoreId } from '../../domain/shared/ids.ts';
 import {
   CommercialStatus,
   parseVehicleSpecs,
@@ -10,9 +10,10 @@ import {
   TradeInStance,
 } from '../../domain/vehicle/vehicle.ts';
 import { EvidenceType, type Evidence } from '../../domain/lock/evidence.ts';
-import { toInstant } from '../../domain/shared/clock.ts';
+import { toInstant, type Instant } from '../../domain/shared/clock.ts';
 import type { AppContext } from '../../application/context.ts';
 import {
+  type LoadedVehicle,
   buildVehicleView,
   extendCommercialLock,
   loadVehicle,
@@ -43,6 +44,12 @@ import {
 import { requireActor } from './support.ts';
 
 export function registerInventoryRoutes(router: Router, context: AppContext): void {
+  // Prazo e restante da trava dependem da politica: com o relogio parado
+  // (carro a caminho de quem travou) o prazo nominal nao e o que vale.
+  const lockPolicy = context.policies.lock;
+  const vehicleView = (loaded: LoadedVehicle, viewerStoreId: StoreId, at: Instant) =>
+    vehicleViewDto(buildVehicleView(loaded, viewerStoreId, at, lockPolicy), at);
+
   /** Catalogo da rede. O preco liquido e visivel a todo membro — e o dado que faz a rede existir. */
   router.get('/api/v1/veiculos', async (request) => {
     const actor = requireActor(request);
@@ -71,7 +78,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const at = context.clock.now();
     return json(200, {
       total: page.total,
-      veiculos: page.items.map((loaded) => vehicleViewDto(buildVehicleView(loaded, actor.value.store.id, at), at)),
+      veiculos: page.items.map((loaded) => vehicleView(loaded, actor.value.store.id, at)),
     });
   });
 
@@ -102,7 +109,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
-    return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
+    return json(200, vehicleView(loaded.value, actor.value.store.id, at));
   });
 
   router.get('/api/v1/veiculos/meus', async (request) => {
@@ -113,7 +120,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const at = context.clock.now();
     return json(200, {
       total: page.total,
-      veiculos: page.items.map((loaded) => vehicleViewDto(buildVehicleView(loaded, actor.value.store.id, at), at)),
+      veiculos: page.items.map((loaded) => vehicleView(loaded, actor.value.store.id, at)),
     });
   });
 
@@ -130,7 +137,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const alheios = page.items.filter((loaded) => loaded.vehicle.ownerStoreId !== actor.value.store.id);
     return json(200, {
       total: alheios.length,
-      veiculos: alheios.map((loaded) => vehicleViewDto(buildVehicleView(loaded, actor.value.store.id, at), at)),
+      veiculos: alheios.map((loaded) => vehicleView(loaded, actor.value.store.id, at)),
     });
   });
 
@@ -142,7 +149,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
 
     const at = context.clock.now();
-    return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
+    return json(200, vehicleView(loaded.value, actor.value.store.id, at));
   });
 
   router.post('/api/v1/veiculos', async (request) => {
@@ -188,7 +195,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
-    return json(201, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
+    return json(201, vehicleView(loaded.value, actor.value.store.id, at));
   });
 
   /**
@@ -217,7 +224,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
-    return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
+    return json(200, vehicleView(loaded.value, actor.value.store.id, at));
   });
 
   router.post('/api/v1/veiculos/:id/laudo', async (request) => {
@@ -243,7 +250,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     const loaded = await loadVehicle(context, actor.value, result.value.id);
     if (!loaded.ok) return errorResponse(loaded.error, request.requestId);
     const at = context.clock.now();
-    return json(200, vehicleViewDto(buildVehicleView(loaded.value, actor.value.store.id, at), at));
+    return json(200, vehicleView(loaded.value, actor.value.store.id, at));
   });
 
   router.delete('/api/v1/veiculos/:id', async (request) => {
@@ -288,8 +295,8 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
 
     const at = context.clock.now();
     return json(201, {
-      trava: result.value.lock === null ? null : lockDto(result.value.lock, at),
-      veiculo: vehicleViewDto(buildVehicleView(result.value, actor.value.store.id, at), at),
+      trava: result.value.lock === null ? null : lockDto(result.value.lock, at, lockPolicy),
+      veiculo: vehicleView(result.value, actor.value.store.id, at),
     });
   });
 
@@ -320,7 +327,8 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
     if (!result.ok) return errorResponse(result.error, request.requestId);
 
     const at = context.clock.now();
-    return json(200, { trava: result.value.lock === null ? null : lockDto(result.value.lock, at) });
+    const trava = result.value.lock;
+    return json(200, { trava: trava === null ? null : lockDto(trava, at, lockPolicy) });
   });
 
   /** Libera a trava antes do prazo. O carro volta a rede sem sair do lugar. */
@@ -339,7 +347,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
 
     const at = context.clock.now();
     return json(200, {
-      veiculo: vehicleViewDto(buildVehicleView(result.value, actor.value.store.id, at), at),
+      veiculo: vehicleView(result.value, actor.value.store.id, at),
     });
   });
 
@@ -349,7 +357,7 @@ export function registerInventoryRoutes(router: Router, context: AppContext): vo
 
     const history = await context.repos.locks.historyByVehicle(asVehicleId(request.params['id'] as string));
     const at = context.clock.now();
-    return json(200, { total: history.length, travas: history.map((lock) => lockDto(lock, at)) });
+    return json(200, { total: history.length, travas: history.map((lock) => lockDto(lock, at, lockPolicy)) });
   });
 }
 

@@ -83,7 +83,7 @@ export async function exitPendencies(
   for (const vehicle of envolvidos.values()) {
     if (vehicle.activeLockId !== null) {
       const lock = await context.repos.locks.byId(vehicle.activeLockId);
-      if (lock !== undefined && isLockActive(lock, now)) openLocks += 1;
+      if (lock !== undefined && isLockActive(lock, now, context.policies.lock)) openLocks += 1;
     }
     for (const deal of await context.repos.deals.byVehicle(vehicle.id)) {
       if (isTerminal(deal)) continue;

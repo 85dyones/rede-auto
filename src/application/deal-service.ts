@@ -165,7 +165,7 @@ export async function confirmDealSale(
 
   const at = context.clock.now();
   const lock = loaded.value.lock;
-  if (lock === null || lock.id !== deal.lockId || !isActive(lock, at)) {
+  if (lock === null || lock.id !== deal.lockId || !isActive(lock, at, context.policies.lock)) {
     // A trava caiu enquanto a negociacao era montada: o carro voltou a rede e
     // pode ter sido travado por outra loja. Fechar assim mesmo criaria a venda
     // duplicada que a plataforma existe para impedir.
@@ -186,6 +186,7 @@ export async function confirmDealSale(
     lock,
     dealId: deal.id,
     now: at,
+    policy: context.policies.lock,
   });
   if (!lockTransition.ok) return lockTransition;
 

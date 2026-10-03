@@ -12,7 +12,13 @@ import { FuelType, TradeInStance, TransmissionType } from '../domain/vehicle/veh
 import { asClusterId, asMemberId, asStoreId, asUserId } from '../domain/shared/ids.ts';
 import { PhotoAngle, sealTerm, TransferPurpose } from '../domain/custody/custody.ts';
 import type { Actor } from './context.ts';
-import { loadVehicle, openCommercialLock, registerVehicle, searchCatalog } from './inventory-service.ts';
+import {
+  buildVehicleView,
+  loadVehicle,
+  openCommercialLock,
+  registerVehicle,
+  searchCatalog,
+} from './inventory-service.ts';
 import {
   completeCustodyTransfer,
   declareVehicleDropOff,
@@ -38,7 +44,7 @@ import { openStoreBranch } from './governance-service.ts';
 import { runSweep, startSweeper } from './scheduler.ts';
 
 /** Termo com as cinco fotos obrigatorias — o minimo que a custodia exige. */
-function termoDeVistoria(actor: Actor, odometro: number) {
+function termoDeVistoria(actor: Actor, odometro: number, at: number = T0) {
   const termo = sealTerm(
     {
       odometerKm: odometro,
@@ -59,7 +65,7 @@ function termoDeVistoria(actor: Actor, odometro: number) {
       userId: actor.user.id,
       storeId: actor.store.id,
     },
-    T0,
+    at,
   );
   assert.ok(termo.ok);
   return termo.value;
@@ -143,6 +149,101 @@ describe('deduplicacao no cadastro manual', () => {
     const { app, lojaA } = await novaApp();
     const criado = await registerVehicle(app.context, lojaA, cadastro('RGT4B71', '9BWZZZ377VT004251'));
     assert.equal(criado.ok && criado.value.commercialStatus, 'DRAFT');
+    await app.stop();
+  });
+});
+
+/**
+ * A trava cujo carro esta a caminho de quem travou, pelo caminho real: o
+ * varredor, a leitura do veiculo e o pedido de recall. Os tres decidiam pelo
+ * prazo NOMINAL, e o relogio parado so existia em `isActive`.
+ */
+describe('trava com o carro a caminho de quem travou', () => {
+  const laudo = {
+    status: 'APPROVED',
+    reportNumber: 'LC-1',
+    provider: 'Cautelar Brasil',
+    issuedAt: T0,
+    expiresAt: T0 + 90 * 24 * HOUR,
+    fileUrl: null,
+  } as const;
+
+  test('o varredor nao expira a trava no meio da viagem, e a chegada devolve o tempo', async () => {
+    const { app, clock, lojaA, lojaB } = await novaApp();
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaA, {
+        ...cadastro('RGT4B71', '9BWZZZ377VT004251'),
+        inspection: laudo,
+      }),
+    );
+    unwrap(await openCommercialLock(app.context, lojaB, { vehicleId: carro.id }));
+    const saida = unwrap(
+      await startCustodyTransfer(app.context, lojaA, {
+        vehicleId: carro.id,
+        toStoreId: lojaB.store.id,
+        purpose: TransferPurpose.TEST_DRIVE,
+        checkout: termoDeVistoria(lojaA, 38_400),
+      }),
+    );
+
+    clock.advance(5 * HOUR);
+    assert.equal((await runSweep(app.context)).expiredLocks, 0, 'o carro ainda esta na estrada');
+
+    const lido = unwrap(await loadVehicle(app.context, lojaB, carro.id));
+    assert.equal(lido.vehicle.commercialStatus, 'LOCKED', 'a leitura tambem nao expira');
+    const vista = buildVehicleView(lido, lojaB.store.id, clock.now(), app.context.policies.lock);
+    assert.equal(vista.lock?.remainingMs, 4 * HOUR, 'cinco horas de viagem, nada consumido');
+    assert.equal(vista.lock?.clockStoppedSince, T0);
+
+    const entrada = termoDeVistoria(lojaB, 38_420, clock.now());
+    unwrap(await completeCustodyTransfer(app.context, lojaB, saida.transfer.id, entrada));
+
+    // Chegou as T0+5h com 4h no relogio: vence as T0+9h, nao as T0+4h.
+    clock.set(T0 + 9 * HOUR - 60_000);
+    assert.equal((await runSweep(app.context)).expiredLocks, 0);
+    clock.set(T0 + 9 * HOUR);
+    assert.equal((await runSweep(app.context)).expiredLocks, 1);
+    await app.stop();
+  });
+
+  test('recall pedido com o carro a caminho de quem travou espera a trava', async () => {
+    // O carro esta na Loja C; a Loja B trava e a C o manda para ela. Passado o
+    // prazo nominal, a dona pede o carro de volta: a exclusividade da B segue
+    // valendo, porque o relogio dela esta parado.
+    const { app, clock, lojaA, lojaB } = await novaApp();
+    const lojaC = seededActor(app.seed!.stores[2]!);
+    const carro = unwrap(
+      await registerVehicle(app.context, lojaA, {
+        ...cadastro('RGT4B71', '9BWZZZ377VT004251'),
+        inspection: laudo,
+      }),
+    );
+    const paraC = unwrap(
+      await startCustodyTransfer(app.context, lojaA, {
+        vehicleId: carro.id,
+        toStoreId: lojaC.store.id,
+        purpose: TransferPurpose.EXTENDED_STOCK,
+        checkout: termoDeVistoria(lojaA, 38_400),
+      }),
+    );
+    const entradaEmC = termoDeVistoria(lojaC, 38_410);
+    unwrap(await completeCustodyTransfer(app.context, lojaC, paraC.transfer.id, entradaEmC));
+
+    unwrap(await openCommercialLock(app.context, lojaB, { vehicleId: carro.id }));
+    unwrap(
+      await startCustodyTransfer(app.context, lojaC, {
+        vehicleId: carro.id,
+        toStoreId: lojaB.store.id,
+        purpose: TransferPurpose.TEST_DRIVE,
+        checkout: termoDeVistoria(lojaC, 38_410),
+      }),
+    );
+
+    clock.advance(5 * HOUR);
+    const recall = unwrap(
+      await requestVehicleRecall(app.context, lojaA, { vehicleId: carro.id, reason: RecallReason.OWN_SALE }),
+    );
+    assert.equal(recall.status, 'WAITING_LOCK_RELEASE');
     await app.stop();
   });
 });
