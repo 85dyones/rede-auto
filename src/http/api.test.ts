@@ -26,6 +26,7 @@ const PRIME_VENDEDOR = 'demo_prime_vendedor';
 const VELOZ = 'demo_veloz_titular';
 const VELOZ_VENDEDOR = 'demo_veloz_vendedor';
 const CENTRAL = 'demo_central_vendedor';
+const CRON_SECRET = 'segredo-do-cron-de-teste';
 
 type ApiResponse<T = Record<string, unknown>> = { status: number; body: T };
 
@@ -74,7 +75,7 @@ const responsavel = { nome: 'Roberto Conferente', cpf: '529.982.247-25', funcao:
 
 before(async () => {
   app = await buildTestApplication({
-    config: { ...loadConfig(), port: 0, seedDemoData: true, publicBaseUrl: '' },
+    config: { ...loadConfig(), port: 0, seedDemoData: true, publicBaseUrl: '', cronSecret: CRON_SECRET },
     clock,
     ids: sequentialIdGenerator(),
   });
@@ -1461,5 +1462,33 @@ describe('trava com o carro a caminho de quem travou', () => {
     assert.equal(atual?.situacao, 'ACTIVE');
     assert.equal(atual?.restante, '4h', 'o historico conta o mesmo restante que o catalogo');
     assert.notEqual(atual?.relogioParadoDesde, null);
+  });
+});
+
+describe('varredura pelo cron', () => {
+  // Na Vercel o processo nao e continuo: quem dispara o varredor e o cron, que
+  // apresenta o segredo em `Authorization: Bearer`. A rota e publica — nao ha
+  // chave de loja —, entao o segredo e a unica coisa entre ela e qualquer um.
+  test('sem o segredo, ou com o errado, nao varre', async () => {
+    const semSegredo = await api<{ erro: { codigo: string } }>('GET', '/api/v1/manutencao/varredura');
+    assert.equal(semSegredo.status, 401);
+    assert.equal(semSegredo.body.erro.codigo, 'CRON_SECRET_INVALID');
+
+    const errado = await api('GET', '/api/v1/manutencao/varredura', { key: 'outro-segredo' });
+    assert.equal(errado.status, 401);
+
+    const chaveDeLoja = await api('GET', '/api/v1/manutencao/varredura', { key: PRIME });
+    assert.equal(chaveDeLoja.status, 401, 'chave de loja nao e segredo de cron');
+  });
+
+  test('com o segredo, varre e diz o que fez', async () => {
+    const response = await api<{ travasExpiradas: number; mensalidadesEmitidas: number }>(
+      'GET',
+      '/api/v1/manutencao/varredura',
+      { key: CRON_SECRET },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(typeof response.body.travasExpiradas, 'number');
+    assert.equal(typeof response.body.mensalidadesEmitidas, 'number');
   });
 });

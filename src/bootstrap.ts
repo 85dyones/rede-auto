@@ -12,7 +12,7 @@ import { randomIdGenerator, type IdGenerator } from './domain/shared/ids.ts';
 import { EventBus } from './domain/shared/events.ts';
 import { type AppConfig, loadConfig } from './config.ts';
 import type { AppContext } from './application/context.ts';
-import { startSweeper, type Sweeper } from './application/scheduler.ts';
+import { runSweep, startSweeper, type Sweeper } from './application/scheduler.ts';
 import { registerNotificationSubscriber } from './application/notifications.ts';
 import { createInMemoryRepositories, type Repositories } from './infra/persistence/repositories.ts';
 import { Database } from './infra/persistence/postgres/database.ts';
@@ -29,6 +29,7 @@ import { registerFeedRoutes } from './http/routes/feeds.ts';
 import { createHttpServer } from './http/server.ts';
 import { PILOT_CLUSTER_SLUG, seedFoundingNetwork, type SeedResult } from './infra/seed.ts';
 import type { Server } from 'node:http';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 export type Application = {
   readonly config: AppConfig;
@@ -126,7 +127,7 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
           resolve(typeof address === 'object' && address !== null ? address.port : config.port);
         });
       });
-      sweeper = startSweeper(context, config.sweepIntervalMs);
+      if (config.sweepIntervalMs !== null) sweeper = startSweeper(context, config.sweepIntervalMs);
       return { port };
     },
 
@@ -174,6 +175,39 @@ function buildRouter(context: AppContext, config: AppConfig): Router {
     { public: true },
   );
 
+  // Varredura disparada pelo cron. A rota nao existe sem `CRON_SECRET`: um
+  // endpoint publico que muda estado precisa de um segredo, e sem segredo
+  // configurado nao ha o que conferir.
+  const cronSecret = config.cronSecret;
+  if (cronSecret !== null) {
+    router.get(
+      '/api/v1/manutencao/varredura',
+      async (request) => {
+        const authorization = request.headers['authorization'];
+        const received = typeof authorization === 'string' ? authorization : '';
+        if (!sameSecret(received, `Bearer ${cronSecret}`)) {
+          return json(401, {
+            erro: { codigo: 'CRON_SECRET_INVALID', mensagem: 'Segredo do cron ausente ou invalido.' },
+            requestId: request.requestId,
+          });
+        }
+        const result = await runSweep(context);
+        return json(200, {
+          travasExpiradas: result.expiredLocks,
+          recallsDescumpridos: result.breachedRecalls,
+          mensalidadesEmitidas: result.chargesIssued,
+          empresasSuspensas: result.membersSuspended,
+          quebrasRegistradas: result.breachesRecorded,
+          patiosSuspensos: result.storesSuspended,
+          patiosReabertos: result.storesReopened,
+          mocoesCaducas: result.motionsLapsed,
+          saidasConcluidas: result.exitsCompleted,
+        });
+      },
+      { public: true },
+    );
+  }
+
   registerNetworkRoutes(router, context);
   registerInventoryRoutes(router, context);
   registerCustodyRoutes(router, context);
@@ -182,4 +216,10 @@ function buildRouter(context: AppContext, config: AppConfig): Router {
   registerFeedRoutes(router, context);
 
   return router;
+}
+
+/** Compara em tempo constante, sobre o hash, para o tempo nao vazar o prefixo certo. */
+function sameSecret(received: string, expected: string): boolean {
+  const digest = (value: string): Buffer => createHash('sha256').update(value).digest();
+  return timingSafeEqual(digest(received), digest(expected));
 }

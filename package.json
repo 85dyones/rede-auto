@@ -9,6 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "test": "node --test \"src/**/*.test.ts\"",
     "test:watch": "node --test --watch \"src/**/*.test.ts\"",
     "start": "node src/main.ts",

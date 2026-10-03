@@ -896,3 +896,36 @@ derruba aquele teste —, e por isso cada camada tem o seu.
 
 **Custo assumido.** O `pg` traz cerca de dez pacotes transitivos, todos do mesmo
 projeto. A versão é fixa: atualizar é um ato, não um acidente do `npm install`.
+
+---
+
+## 33. Hospedagem na Vercel: o servidor inteiro, não funções
+
+**Decisão.** Na Vercel roda o mesmo servidor `node:http` de sempre. Um
+`server.mjs` na raiz carrega o JavaScript compilado (`dist/`, gerado por
+`npm run build`), e a Vercel captura o `listen()` dele e entrega as requisições.
+O varredor deixa de rodar dentro do processo e passa a ser disparado por cron,
+numa rota protegida por `CRON_SECRET`.
+
+**Por que o servidor, e não funções em `/api`.** As funções em `/api` recebem a
+requisição com auxiliares que leem o corpo antes da aplicação — e a ingestão de
+feed precisa do corpo cru. Elas também exigiriam reescrever o roteamento em
+arquivos. Capturado, o servidor recebe o `IncomingMessage` puro: o que roda
+localmente é o que roda lá.
+
+**Por que JavaScript compilado, e não o TypeScript direto.** O código importa
+arquivos com extensão `.ts`, o que o type-stripping do Node aceita. Como a
+Vercel compila esses imports, e em que versão do Node, não está no nosso
+controle; o `tsc` com `rewriteRelativeImportExtensions` gera um `dist/` que roda
+em qualquer Node, e é ele que vai.
+
+**Por que o cron, e não o varredor no processo.** Na Vercel o processo não é
+contínuo: ele congela entre requisições, e cada instância varreria por conta
+própria. Com a variável `VERCEL` presente, o varredor interno não sobe.
+
+**Custo assumido.** No plano Hobby o cron da Vercel só roda uma vez por dia, com
+até 59 minutos de imprecisão. Sem varredura frequente, a trava vencida continua
+valendo até alguém abrir o carro, o aviso de que ele voltou à rede atrasa, e o
+SLA estourado demora a virar quebra. O `vercel.json` traz o diário, que funciona
+em qualquer plano; de minuto em minuto, ou o plano Pro, ou o `pg_cron` do
+Supabase chamando a mesma rota com o mesmo segredo.

@@ -97,8 +97,17 @@ export type AppConfig = {
   readonly host: string;
   /** Base publica usada para montar os links white-label. */
   readonly publicBaseUrl: string;
-  /** Intervalo do varredor de travas vencidas e SLAs estourados. */
-  readonly sweepIntervalMs: number;
+  /**
+   * Intervalo do varredor de travas vencidas e SLAs estourados, ou `null` para
+   * nao rodar no processo. Na Vercel o processo nao e continuo, e cada
+   * instancia varreria por conta propria: la quem dispara e o cron.
+   */
+  readonly sweepIntervalMs: number | null;
+  /**
+   * Segredo que o cron apresenta em `Authorization: Bearer`. Sem ele, a rota de
+   * varredura por GET nao existe.
+   */
+  readonly cronSecret: string | null;
   readonly maxRequestBodyBytes: number;
   readonly policies: NetworkPolicies;
   /** Popula a rede com as fundadoras de exemplo, as chaves fixas e o estoque. */
@@ -118,7 +127,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ),
     // A trava tem granularidade de horas; varrer a cada minuto e mais que
     // suficiente e mantem os eventos de expiracao pontuais.
-    sweepIntervalMs: readInt(env['SWEEP_INTERVAL_MS'], MINUTE),
+    sweepIntervalMs: sweepIntervalFrom(env),
+    cronSecret: env['CRON_SECRET']?.trim() || null,
     maxRequestBodyBytes: readInt(env['MAX_BODY_BYTES'], 40 * 1024 * 1024),
     policies: defaultPolicies(),
     seedDemoData: seedDemoDataFrom(env, database),
@@ -134,6 +144,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 function seedDemoDataFrom(env: NodeJS.ProcessEnv, database: DatabaseConfig | null): boolean {
   const flag = env['SEED_DEMO_DATA'];
   return database === null ? flag !== 'false' : flag === 'true';
+}
+
+/** `SWEEP_INTERVAL_MS=0` desliga; na Vercel (`VERCEL` definida) o padrao e desligado. */
+function sweepIntervalFrom(env: NodeJS.ProcessEnv): number | null {
+  const raw = env['SWEEP_INTERVAL_MS'];
+  if (raw === '0') return null;
+  if (raw === undefined && env['VERCEL'] !== undefined) return null;
+  return readInt(raw, MINUTE);
 }
 
 function readInt(value: string | undefined, fallback: number): number {

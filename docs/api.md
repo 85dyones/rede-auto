@@ -1043,6 +1043,21 @@ Existe para teste e operação. O varredor periódico faz o mesmo sozinho, e a
 leitura de qualquer veículo já reconcilia a trava — chamar esta rota **nunca é
 necessário para a correção do estado**.
 
+### `GET /api/v1/manutencao/varredura`
+
+A mesma varredura, para o cron. Na Vercel o processo não é contínuo, e é o cron
+quem dispara o varredor. Não usa chave de loja: exige
+`Authorization: Bearer <CRON_SECRET>`, e **só existe** se `CRON_SECRET` estiver
+configurado. Sem o segredo certo, `401 CRON_SECRET_INVALID`.
+
+```jsonc
+{
+  "travasExpiradas": 0, "recallsDescumpridos": 0, "mensalidadesEmitidas": 0,
+  "empresasSuspensas": 0, "quebrasRegistradas": 0, "patiosSuspensos": 0,
+  "patiosReabertos": 0, "mocoesCaducas": 0, "saidasConcluidas": 0
+}
+```
+
 ---
 
 ## Configuração
@@ -1051,9 +1066,16 @@ necessário para a correção do estado**.
 |---|---|---|
 | `PORT` | `3000` | porta HTTP |
 | `HOST` | `0.0.0.0` | interface |
-| `SWEEP_INTERVAL_MS` | `60000` | intervalo do varredor |
+| `SWEEP_INTERVAL_MS` | `60000`; desligado na Vercel | intervalo do varredor; `0` desliga |
 | `MAX_BODY_BYTES` | `41943040` | teto do corpo (feeds grandes) |
-| `SEED_DEMO_DATA` | `true` | semeia as fundadoras do piloto e o estoque de exemplo |
+| `SEED_DEMO_DATA` | `true` em memória, `false` com banco | semeia as fundadoras do piloto e o estoque de exemplo |
+| `DATABASE_URL` | — | liga o Postgres; sem ela, os dados ficam em memória |
+| `DATABASE_SCHEMA` | `rede` | schema das tabelas |
+| `DATABASE_SSL` / `DATABASE_CA_CERT` | `verify` fora do localhost | TLS com o banco; o certificado do Supabase vai em `DATABASE_CA_CERT` |
+| `CRON_SECRET` | — | habilita `GET /api/v1/manutencao/varredura` para o cron |
+
+Detalhes de cada uma e o passo a passo da Vercel estão no
+[handoff do projeto](handoff-projeto.md#na-vercel).
 
 As políticas de negócio (4h de trava, 4h úteis de SLA, endossos recomendados,
 tolerâncias de vistoria) ficam em `src/config.ts`, não em variável de ambiente:

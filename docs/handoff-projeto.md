@@ -70,7 +70,7 @@ declarado de 60 km.
 | Auth | chave de API, só o hash, no banco | adaptador de desenvolvimento; ver §8 |
 | PDF | gerador próprio (`src/infra/pdf/`) | sem biblioteca |
 | XML (feeds) | parser próprio (`src/infra/feeds/xml.ts`) | sem biblioteca, DOCTYPE rejeitado |
-| Testes | `node:test` | 584 testes, 24 arquivos |
+| Testes | `node:test` | 591 em memória, 598 contra o Postgres; 26 arquivos |
 | Frontend | **não existe** | ver §7 |
 
 **Uma dependência de runtime só, e por decisão**
@@ -102,7 +102,6 @@ TEST_DATABASE_URL=… npm run test:pg # a suíte inteira contra o banco, um sche
 | `PORT` | `3000` | |
 | `HOST` | `0.0.0.0` | |
 | `PUBLIC_BASE_URL` | `http://localhost:$PORT` | monta as URLs do material de divulgação |
-| `SWEEP_INTERVAL_MS` | `60000` | intervalo do varredor periódico |
 | `MAX_BODY_BYTES` | `41943040` | teto do corpo da requisição (40 MB, por causa das fotos) |
 | `SEED_DEMO_DATA` | `true` em memória, `false` com banco | a rede de exemplo e as chaves fixas; com banco, só com `true` explícito |
 | `DATABASE_URL` | — | liga o Postgres; sem ela, tudo fica em memória |
@@ -110,6 +109,34 @@ TEST_DATABASE_URL=… npm run test:pg # a suíte inteira contra o banco, um sche
 | `DATABASE_SSL` | `verify` (remoto), `off` (localhost) | `no-verify` cifra sem conferir o certificado; só explícito |
 | `DATABASE_CA_CERT` | — | certificado da cadeia do Supabase (PEM), para o `verify` funcionar |
 | `DATABASE_POOL_MAX` | `3` | conexões por instância; numa função serverless, poucas |
+| `CRON_SECRET` | — | segredo do cron; sem ele, a varredura por `GET` não existe |
+| `SWEEP_INTERVAL_MS` | `60000`; desligado na Vercel | `0` desliga o varredor dentro do processo |
+
+### Na Vercel
+
+O servidor inteiro roda lá
+([decisão 33](decisoes.md#33-hospedagem-na-vercel-o-servidor-inteiro-não-funções)):
+`server.mjs` carrega `dist/main.js`, que o `npm run build` gera — o
+`vercel.json` já manda rodar. Para subir:
+
+1. **Importar o repositório** num projeto novo (preset *Other*). Região das
+   funções: a padrão, `iad1` — a mesma do Supabase `rede-auto` (`us-east-1`).
+2. **Variáveis**, em Production e Preview:
+   - `DATABASE_URL` — a do *Transaction pooler* do Supabase (porta 6543), no
+     botão *Connect* do projeto, com a senha do banco;
+   - `DATABASE_CA_CERT` — o certificado em *Database Settings → SSL
+     Configuration → Download certificate*, colado inteiro;
+   - `CRON_SECRET` — qualquer texto aleatório longo. É o que o cron apresenta.
+3. **Schema**: `DATABASE_URL=… npm run db:migrate`. O `001_inicial` já foi
+   aplicado no Supabase `rede-auto` em 2026-10-03.
+4. **Varredor**: o `vercel.json` agenda um cron diário, o único que o plano
+   Hobby aceita. No Pro, troque por `* * * * *`; no Hobby, o `pg_cron` do
+   Supabase pode chamar `GET /api/v1/manutencao/varredura` de minuto em minuto,
+   com `Authorization: Bearer <CRON_SECRET>`.
+
+A variável `VERCEL`, que a própria plataforma define, desliga o varredor dentro
+do processo. Para lojas em Curitiba, `gru1` com um Supabase em `sa-east-1`
+cortaria uns 120 ms por requisição — mas exige outro projeto no Supabase.
 
 ### Chaves de desenvolvimento
 
@@ -148,7 +175,7 @@ src/
 scripts/demo.ts  os 20 atos
 ```
 
-**20.885 linhas de produção, 9.102 de teste.**
+**22.225 linhas de produção, 9.462 de teste.**
 
 ### As cinco regras estruturais
 
@@ -606,8 +633,9 @@ dele. Oito lojas travando o mesmo carro ao mesmo tempo: uma trava, sete recebem
 [decisão 23](decisoes.md#23-concorrência-o-que-muda-quando-sair-da-memória) têm
 teste contra banco de verdade.
 
-Falta **hospedar**: a escolha é a Vercel, e a adaptação (função, varredor por
-cron, variáveis) é o próximo passo.
+A hospedagem está preparada para a Vercel
+([decisão 33](decisoes.md#33-hospedagem-na-vercel-o-servidor-inteiro-não-funções)):
+falta criar o projeto e configurar as variáveis — ver *Na Vercel*, na §2.
 
 ### 2. Autenticação de produção
 
@@ -709,16 +737,16 @@ descartado, e o que uma mutação provou. O diff já conta o quê.
 
 | | |
 |---|---|
-| Testes | **584**, todos passando |
+| Testes | **591** em memória e **598** contra o Postgres, todos passando |
 | Typecheck | estrito, sem erros |
-| Linhas de produção | 20.885 |
-| Linhas de teste | 9.102 |
-| Arquivos TypeScript | 94 (24 de teste) |
+| Linhas de produção | 22.225 |
+| Linhas de teste | 9.462 |
+| Arquivos TypeScript | 102 (26 de teste) |
 | Rotas HTTP | 68 |
 | Eventos de domínio | 73 tipos em 11 prefixos |
 | Decisões documentadas | 31 |
 | Atos da demo | 20 |
-| Dependências de runtime | 0 |
+| Dependências de runtime | 1 (`pg`) |
 
 ### A rede semeada
 
