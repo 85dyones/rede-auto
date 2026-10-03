@@ -638,6 +638,7 @@ sai em `GET /api/v1`.
 
 | | |
 |---|---|
+| [`docs/handoff-projeto.md`](docs/handoff-projeto.md) | **comece por aqui**: infra, arquitetura, regras comerciais e de governança, e o que falta |
 | [`docs/dominio.md`](docs/dominio.md) | modelo de domínio, máquinas de estado e invariantes |
 | [`docs/api.md`](docs/api.md) | referência da API, com exemplos de requisição |
 | [`docs/decisoes.md`](docs/decisoes.md) | decisões de projeto e o que foi descartado |

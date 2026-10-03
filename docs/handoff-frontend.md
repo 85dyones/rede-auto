@@ -8,7 +8,8 @@ contrato real da API — os JSON citados são respostas de verdade, capturadas d
 servidor rodando, não exemplos inventados. Se um campo não aparece aqui, ele não
 existe ainda.
 
-Leituras de apoio: [`../README.md`](../README.md) (o produto),
+Leituras de apoio: [`handoff-projeto.md`](handoff-projeto.md) (o projeto inteiro:
+infra, regras comerciais, governança), [`../README.md`](../README.md) (o produto),
 [`dominio.md`](dominio.md) (máquinas de estado), [`api.md`](api.md) (contrato
 completo), [`glossario.md`](glossario.md) (vocabulário).
 

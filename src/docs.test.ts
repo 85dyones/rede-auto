@@ -33,14 +33,37 @@ function markdownFiles(): string[] {
  * Ancora no estilo GitHub: minusculas, pontuacao fora, espacos viram hifen.
  * Os acentos ficam — e por isso que `#23-concorrência-...` e a forma correta.
  */
+/**
+ * A ancora que o GitHub gera para um titulo.
+ *
+ * As tres substituicoes finais sao a regra do GitHub, e a ordem importa:
+ * minusculas, fora tudo que nao e letra, numero, espaco, hifen ou
+ * SUBLINHADO, e espaco vira hifen.
+ *
+ * O sublinhado fica, e isso ja esteve errado aqui. Uma versao anterior o
+ * removia junto com o asterisco, tratando os dois como marcadores de enfase —
+ * mas o GitHub o preserva, entao o teste calculava uma ancora que o
+ * renderizador nunca produz. Erro dos dois lados ao mesmo tempo: aceitava link
+ * quebrado de verdade e recusava link que funciona. Um teste de link que nao
+ * usa a regra do renderizador da confianca falsa, que e pior que nao ter teste.
+ *
+ * O backtick sai antes porque o GitHub remove a marcacao de codigo e mantem o
+ * conteudo; o asterisco sai porque e enfase, e nao sobra no texto renderizado.
+ *
+ * E a troca de espaco e UM POR UM (`/ /g`), nao por run (`/\s+/g`). Era o
+ * segundo erro da versao anterior, e aparece exatamente onde a pontuacao removida
+ * deixa dois espacos seguidos: "nao `+ 4 * 3600_000`" vira
+ * `nao--4--3600_000`, com hifen duplo. Colapsar produzia um hifen so, e o link
+ * que o teste aprovava morria no GitHub.
+ */
 function slugify(heading: string): string {
   return heading
     .trim()
     .toLowerCase()
     .replace(/`/g, '')
-    .replace(/[*_]/g, '')
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-');
+    .replace(/\*/g, '')
+    .replace(/[^\p{L}\p{N} _-]/gu, '')
+    .replace(/ /g, '-');
 }
 
 function anchorsOf(markdown: string): Set<string> {

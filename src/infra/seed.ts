@@ -78,6 +78,9 @@ export type SeedResult = {
  */
 const PILOT_CLUSTER_SLUG = 'curitiba-rmc';
 
+/** Chave do segundo patio da Prime. Fixa, como as demais chaves de demo. */
+export const BOQUEIRAO_API_KEY = 'demo_prime_boqueirao';
+
 // A Sul Car entra como CASH_ONLY de proposito: sem uma loja assim, o piloto
 // nunca exercita o caminho que este campo existe para cobrir.
 //
@@ -333,7 +336,7 @@ export async function seedFoundingNetwork(
     active: true,
   };
   await context.repos.users.save(gerenteBoqueirao);
-  apiKeys.register('demo_prime_boqueirao', {
+  apiKeys.register(BOQUEIRAO_API_KEY, {
     storeId: segundoPatio.id,
     userId: gerenteBoqueirao.id,
     label: 'Prime Motors Boqueirao / gerente',
@@ -410,14 +413,23 @@ export async function seedFoundingNetwork(
 /** Resumo legivel das chaves criadas, impresso no start em desenvolvimento. */
 export function describeSeed(seed: SeedResult): string {
   const lines = [
-    `Rede constituida com ${seed.stores.length} lojas fundadoras e ${seed.vehicles.length} veiculos de exemplo.`,
+    `Rede constituida com ${seed.stores.length} empresas fundadoras, ` +
+      `${seed.stores.length + 1} patios e ${seed.vehicles.length} veiculos de exemplo.`,
     '',
     'Chaves de API de desenvolvimento (Authorization: Bearer <chave>):',
   ];
   for (const seeded of seed.stores) {
     lines.push(
-      `  ${seeded.store.profile.tradeName.padEnd(20)} titular=${seeded.principalApiKey.padEnd(24)} vendedor=${seeded.salespersonApiKey}`,
+      `  ${seeded.store.profile.tradeName.padEnd(22)} titular=${seeded.principalApiKey.padEnd(26)} vendedor=${seeded.salespersonApiKey}`,
     );
   }
+  // O segundo patio da Prime tem chave propria e nao aparecia aqui. E o unico
+  // jeito de exercitar a separacao empresa/patio pela API, entao esconde-la
+  // fazia a chave existir so para quem leu o seed.
+  lines.push(
+    '',
+    `  ${'Prime Motors Boqueirao'.padEnd(22)} gerente=${BOQUEIRAO_API_KEY}`,
+    '  (segundo patio da Prime: mesma empresa, mesma raiz de CNPJ, outra loja)',
+  );
   return lines.join('\n');
 }
