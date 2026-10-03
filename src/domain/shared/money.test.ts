@@ -61,6 +61,25 @@ describe('Money', () => {
       assert.equal(unwrap(parseMoney('89900', { field: 'preco' })).cents, 8_990_000);
     });
 
+    test('recusa o separador ambiguo em vez de adivinhar', () => {
+      // "89.900" e R$ 89.900,00 para quem escreve em pt-BR e R$ 89,90 para quem
+      // escreve em ingles. Adivinhar errado publica o carro por mil vezes menos,
+      // e o valor passa em toda validacao: e positivo, e o liquido fica abaixo
+      // do publico.
+      for (const ambiguo of ['89.900', '89,900', 'R$ 92.900', '1.500', '-1.500']) {
+        const result = parseMoney(ambiguo, { field: 'preco', allowNegative: true });
+        assert.equal(result.ok === false && result.error.code, 'MONEY_AMBIGUOUS', ambiguo);
+      }
+    });
+
+    test('com os centavos, ou sem separador nenhum, nao ha o que adivinhar', () => {
+      assert.equal(unwrap(parseMoney('89.900,00', { field: 'preco' })).cents, 8_990_000);
+      assert.equal(unwrap(parseMoney('89,90', { field: 'preco' })).cents, 8_990);
+      assert.equal(unwrap(parseMoney('89.9', { field: 'preco' })).cents, 8_990);
+      assert.equal(unwrap(parseMoney('89900', { field: 'preco' })).cents, 8_990_000);
+      assert.equal(unwrap(parseMoney('1.234.567,89', { field: 'preco' })).cents, 123_456_789);
+    });
+
     test('rejeita lixo, negativo e valores absurdos', () => {
       for (const invalid of ['', 'sob consulta', null, undefined, {}, Number.NaN]) {
         const result = parseMoney(invalid, { field: 'preco' });

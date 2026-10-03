@@ -136,13 +136,18 @@ export function buildRecord(
   // numero que a Loja B precisa para decidir se assume o cliente.
   const netPrice = parseMoney(raw.netPrice, { field: 'preco liquido de repasse' });
   if (!netPrice.ok) {
-    return err(
-      issue(
-        'MISSING_NET_PRICE',
-        'Sem preco liquido de repasse o veiculo nao circula na rede.',
-        { received: raw.netPrice ?? null },
-      ),
-    );
+    // Ausente e mal escrito pedem correcoes diferentes ao lojista: dizer "falta"
+    // para um "85.000" mandaria procurar um campo que esta la.
+    if (raw.netPrice === undefined || raw.netPrice.trim() === '') {
+      return err(
+        issue(
+          'MISSING_NET_PRICE',
+          'Sem preco liquido de repasse o veiculo nao circula na rede.',
+          { received: raw.netPrice ?? null },
+        ),
+      );
+    }
+    return err(issue(netPrice.error.code, netPrice.error.message, { received: raw.netPrice }));
   }
   if (gt(netPrice.value, publicPrice.value)) {
     return err(

@@ -182,6 +182,17 @@ describe('ciclo completo de um repasse', () => {
     assert.equal(soPublico.body.precos.liquidoRepresado?.centavos, 8_900_000);
   });
 
+  test('preco com separador ambiguo e recusado com a forma certa de escrever', async () => {
+    const response = await api<{ erro: { codigo: string; mensagem: string } }>(
+      'PATCH',
+      `/api/v1/veiculos/${vehicleId}/precos`,
+      { key: PRIME, body: { precoPublico: '92.900' } },
+    );
+    assert.equal(response.status, 400);
+    assert.equal(response.body.erro.codigo, 'MONEY_AMBIGUOUS');
+    assert.match(response.body.erro.mensagem, /89\.900,00/);
+  });
+
   test('a proposta bancaria estende a trava em 4 horas', async () => {
     clock.advance(3 * HOUR);
     const response = await api<{ trava: { expiraEm: string; extensoes: unknown[] } }>(

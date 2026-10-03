@@ -35,6 +35,12 @@ Com `SEED_DEMO_DATA` ligado (padrão), as chaves saem no console no `npm start`:
 { "precoLiquidoRepasse": "85000.00" }
 ```
 
+`"85.000"` e `"85,000"` são recusados com `400 MONEY_AMBIGUOUS`: um separador só,
+seguido de três dígitos, é milhar em pt-BR e decimal no padrão internacional, e
+as duas leituras convivem nos feeds. Lido como decimal, o carro ia para a rede
+por R$ 85,00. Escreva com os centavos ou sem separador. O feed recusa o item
+pelo mesmo motivo, e o relatório da sincronização diz qual campo.
+
 **Datas** em ISO-8601 UTC. **Prazos** vêm com um campo legível ao lado
 (`restante: "3h 12min"`).
 

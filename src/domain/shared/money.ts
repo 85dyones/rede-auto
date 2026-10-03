@@ -51,6 +51,16 @@ export function parseMoney(
     }
     cents = unit === 'cents' ? Math.round(input) : Math.round(input * 100);
   } else if (typeof input === 'string') {
+    if (hasAmbiguousSeparator(input)) {
+      return err(
+        validationError(
+          'MONEY_AMBIGUOUS',
+          `${field}: "${input}" e ambiguo — o separador pode ser de milhar ou de centavos. ` +
+            'Escreva com os centavos ("89.900,00" ou "89900.00") ou sem separador ("89900").',
+          { field, received: input },
+        ),
+      );
+    }
     const parsed = parseBrazilianDecimal(input);
     if (parsed === null) {
       return err(
@@ -84,12 +94,30 @@ export function parseMoney(
   return ok(fromCents(cents));
 }
 
+function cleanMoneyText(raw: string): string {
+  return raw.replace(/\s/g, '').replace(/^R\$?/i, '');
+}
+
+/**
+ * Um separador so, seguido de exatamente tres digitos: "89.900", "89,900".
+ *
+ * E o unico formato que nenhuma regra resolve. Em pt-BR "89.900" e milhar; no
+ * padrao internacional, e decimal — e os dois convivem nos feeds. Ler como
+ * decimal publicava o carro por R$ 89,90, um valor que passa em toda validacao
+ * (positivo, liquido abaixo do publico) e chega a rede inteira. Ler como
+ * milhar erraria do outro lado, em silencio do mesmo jeito. Recusar com a forma
+ * certa de escrever e o unico caminho em que o erro aparece antes do anuncio.
+ */
+function hasAmbiguousSeparator(raw: string): boolean {
+  return /^-?\d+[.,]\d{3}$/.test(cleanMoneyText(raw));
+}
+
 /**
  * Interpreta numeros escritos no padrao pt-BR ("89.900,00") e no padrao
  * internacional ("89900.00"), que convivem nos feeds dos integradores.
  */
 function parseBrazilianDecimal(raw: string): number | null {
-  const cleaned = raw.replace(/\s/g, '').replace(/^R\$?/i, '');
+  const cleaned = cleanMoneyText(raw);
   if (cleaned === '') return null;
   if (!/^-?[\d.,]+$/.test(cleaned)) return null;
 

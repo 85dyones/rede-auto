@@ -128,6 +128,20 @@ describe('qualificacao do estoque', () => {
     assert.equal(report.issues[0]?.externalId, 'RM-1001');
   });
 
+  test('preco com separador ambiguo e recusado, nao adivinhado', () => {
+    // Lido como decimal, "92.900" publicava o carro por R$ 92,90 — e passava
+    // em toda validacao, com o liquido de "85.000" abaixo dele.
+    const report = run(revendaMaisFeed([{ preco: '92.900', precoRepasse: '85.000' }]));
+    assert.equal(report.counts.created, 0);
+    assert.equal(report.issues[0]?.code, 'MONEY_AMBIGUOUS');
+  });
+
+  test('liquido mal escrito diz o que esta errado, e nao que falta', () => {
+    const report = run(revendaMaisFeed([{ precoRepasse: '85.000' }]));
+    assert.equal(report.counts.created, 0);
+    assert.equal(report.issues[0]?.code, 'MONEY_AMBIGUOUS');
+  });
+
   test('liquido acima do publico e tratado como inversao de colunas', () => {
     const report = run(revendaMaisFeed([{ preco: '80.000,00', precoRepasse: '95.000,00' }]));
     assert.equal(report.issues[0]?.code, 'NET_PRICE_ABOVE_PUBLIC_PRICE');
