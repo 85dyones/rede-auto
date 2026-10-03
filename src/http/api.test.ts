@@ -171,6 +171,15 @@ describe('ciclo completo de um repasse', () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.precos.liquidoRepasse.centavos, 8_500_000, 'o vigente nao muda');
     assert.equal(response.body.precos.liquidoRepresado.centavos, 8_900_000);
+
+    // So o publico, e com o mesmo valor: nao muda nada, e nao pode apagar o represado.
+    const soPublico = await api<{ precos: { liquidoRepresado: { centavos: number } | null } }>(
+      'PATCH',
+      `/api/v1/veiculos/${vehicleId}/precos`,
+      { key: PRIME, body: { precoPublico: '92.900,00' } },
+    );
+    assert.equal(soPublico.status, 200);
+    assert.equal(soPublico.body.precos.liquidoRepresado?.centavos, 8_900_000);
   });
 
   test('a proposta bancaria estende a trava em 4 horas', async () => {

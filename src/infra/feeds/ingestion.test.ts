@@ -210,6 +210,29 @@ describe('o feed nao decide sozinho', () => {
     assert.ok(report.events.some((e) => e.type === 'vehicle.net_price_deferred'));
   });
 
+  test('o feed que volta ao liquido vigente descarta o represado', () => {
+    // O feed e a palavra da dona. Se ele volta a dizer o liquido que esta
+    // valendo, o reajuste represado deixou de existir — mante-lo faria a trava
+    // cair aplicando um preco que o proprio feed ja desmentiu.
+    const travado: Vehicle = {
+      ...(created(run(revendaMaisFeed([{}])))[0] as Vehicle),
+      commercialStatus: CommercialStatus.LOCKED,
+      activeLockId: asLockId('lck_1'),
+    };
+    const reajuste = run(revendaMaisFeed([{ precoRepasse: '89.000,00' }]), { existing: [travado] });
+    const represado = reajuste.changes[0];
+    assert.ok(represado?.kind === 'UPDATED');
+
+    const report = run(revendaMaisFeed([{ precoRepasse: '85.000,00' }]), { existing: [represado.vehicle] });
+    const change = report.changes[0];
+
+    assert.equal(change?.kind, ChangeKind.UPDATED);
+    if (change.kind !== 'UPDATED') return;
+    assert.equal(change.vehicle.pendingNetPrice, null, 'o feed desmentiu o reajuste');
+    assert.equal(change.vehicle.pricing.netPrice.cents, fromReais(85_000).cents);
+    assert.ok(report.events.some((e) => e.type === 'vehicle.pending_net_price_discarded'));
+  });
+
   test('veiculo ja vendido pela rede ignora o feed atrasado do lojista', () => {
     const vendido: Vehicle = {
       ...(created(run(revendaMaisFeed([{}])))[0] as Vehicle),

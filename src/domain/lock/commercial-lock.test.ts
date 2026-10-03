@@ -494,6 +494,62 @@ describe('preco liquido durante a trava', () => {
     assert.equal(expired.vehicle.pendingNetPrice, null);
   });
 
+  test('mudar so o preco publico nao apaga o liquido represado', () => {
+    // O `PATCH /precos` aceita os dois campos separados. Mandar so o publico
+    // descartava o represado em silencio: sem evento, e a dona so descobria
+    // quando a trava caia e o liquido antigo continuava valendo.
+    const locked = lockedByB(availableVehicle());
+    const represado = unwrap(
+      updatePricing({
+        vehicle: locked.vehicle,
+        actorStoreId: lojaA.id,
+        netPrice: fromReais(89_000),
+        now: T0 + HOUR,
+      }),
+    ).state;
+
+    const soPublico = unwrap(
+      updatePricing({
+        vehicle: represado,
+        actorStoreId: lojaA.id,
+        publicPrice: fromReais(95_000),
+        now: T0 + 2 * HOUR,
+      }),
+    ).state;
+
+    assert.equal(soPublico.pricing.publicPrice.cents, fromReais(95_000).cents);
+    assert.equal(soPublico.pendingNetPrice?.cents, fromReais(89_000).cents, 'o represado continua');
+
+    const expired = unwrap(expireLockIfDue(soPublico, locked.lock, T0 + 4 * HOUR, politica)).state;
+    assert.equal(expired.vehicle.pricing.netPrice.cents, fromReais(89_000).cents);
+  });
+
+  test('voltar ao liquido vigente descarta o represado, e isso fica registrado', () => {
+    const locked = lockedByB(availableVehicle());
+    const represado = unwrap(
+      updatePricing({
+        vehicle: locked.vehicle,
+        actorStoreId: lojaA.id,
+        netPrice: fromReais(89_000),
+        now: T0 + HOUR,
+      }),
+    ).state;
+
+    const voltou = unwrap(
+      updatePricing({
+        vehicle: represado,
+        actorStoreId: lojaA.id,
+        netPrice: fromReais(85_000),
+        now: T0 + 2 * HOUR,
+      }),
+    );
+
+    assert.equal(voltou.state.pendingNetPrice, null, 'a dona desistiu do reajuste');
+    const descarte = voltou.events.find((e) => e.type === 'vehicle.pending_net_price_discarded');
+    assert.ok(descarte, 'descartar um represado e decisao da dona e precisa de rastro');
+    assert.equal(descarte.payload['reason'], 'REVERTED_BY_OWNER');
+  });
+
   test('sem trava ativa, a reprecificacao vale na hora', () => {
     const updated = unwrap(
       updatePricing({

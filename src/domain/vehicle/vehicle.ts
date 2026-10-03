@@ -534,21 +534,46 @@ export function updatePricing(command: UpdatePricingCommand): Transition<Vehicle
   const locked = vehicle.commercialStatus === CommercialStatus.LOCKED;
   const netPriceChanged = !moneyEquals(netPrice, vehicle.pricing.netPrice);
 
-  if (locked && netPriceChanged) {
+  if (locked) {
+    // Com trava ativa o liquido vigente nao muda; o que muda e o represado, e
+    // so quando a dona fala dele. Liquido nao informado (so o publico) deixa o
+    // represado como estava — antes ele era apagado em silencio, e a dona so
+    // descobria quando a trava caia com o preco antigo. Liquido igual ao
+    // vigente e a dona desistindo do reajuste: o represado sai, com registro.
+    const pendingNetPrice =
+      command.netPrice === undefined
+        ? vehicle.pendingNetPrice
+        : netPriceChanged
+          ? netPrice
+          : null;
+
+    const events: DomainEvent[] = [];
+    if (command.netPrice !== undefined && netPriceChanged) {
+      events.push(
+        domainEvent('vehicle.net_price_deferred', vehicle.id, now, {
+          reason: 'ACTIVE_COMMERCIAL_LOCK',
+          currentNetPriceCents: vehicle.pricing.netPrice.cents,
+          pendingNetPriceCents: netPrice.cents,
+          lockId: vehicle.activeLockId,
+        }),
+      );
+    }
+    if (vehicle.pendingNetPrice !== null && pendingNetPrice === null) {
+      events.push(
+        domainEvent('vehicle.pending_net_price_discarded', vehicle.id, now, {
+          pendingNetPriceCents: vehicle.pendingNetPrice.cents,
+          reason: 'REVERTED_BY_OWNER',
+        }),
+      );
+    }
+
     const updated: Vehicle = {
       ...vehicle,
       pricing: { ...vehicle.pricing, publicPrice, updatedAt: now },
-      pendingNetPrice: netPrice,
+      pendingNetPrice,
       updatedAt: now,
     };
-    return transitioned(updated, [
-      domainEvent('vehicle.net_price_deferred', vehicle.id, now, {
-        reason: 'ACTIVE_COMMERCIAL_LOCK',
-        currentNetPriceCents: vehicle.pricing.netPrice.cents,
-        pendingNetPriceCents: netPrice.cents,
-        lockId: vehicle.activeLockId,
-      }),
-    ]);
+    return transitioned(updated, events);
   }
 
   const updated: Vehicle = {
@@ -570,7 +595,6 @@ export function updatePricing(command: UpdatePricingCommand): Transition<Vehicle
   return transitioned(updated, events);
 }
 
-/** Aplica o preco represado quando a trava termina. Idempotente. */
 export type UpdateTradeInPolicyCommand = {
   readonly vehicle: Vehicle;
   readonly actorStoreId: StoreId;
@@ -633,6 +657,7 @@ export function updateTradeInPolicy(command: UpdateTradeInPolicyCommand): Transi
   ]);
 }
 
+/** Aplica o preco represado quando a trava termina. Idempotente. */
 export function applyPendingNetPrice(vehicle: Vehicle, now: Instant): Transition<Vehicle> {
   if (vehicle.pendingNetPrice === null) return unchanged(vehicle);
 

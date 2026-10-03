@@ -465,6 +465,11 @@ represado** — a resposta mostra isso:
 }
 ```
 
+Os dois campos são independentes. Mandar só `precoPublico` não mexe no
+represado. Mandar `precoLiquidoRepasse` igual ao vigente é desistir do reajuste:
+o represado sai, e o descarte fica na trilha (`vehicle.pending_net_price_discarded`).
+O feed segue a mesma regra — se ele volta ao líquido vigente, o represado sai.
+
 ### `POST /api/v1/veiculos/:id/trava`
 
 Abre a trava de 4 horas.

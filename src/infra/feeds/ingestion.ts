@@ -305,9 +305,15 @@ function applyRecord(
   const events: DomainEvent[] = [];
 
   // Com trava ativa, o liquido novo fica represado: quem esta negociando fechou
-  // sobre o numero que travou.
+  // sobre o numero que travou. O feed sempre traz o liquido, entao ele tambem
+  // fala do represado: se volta a dizer o vigente, o reajuste deixou de existir.
+  // Mante-lo faria a trava cair aplicando um preco que o proprio feed desmentiu.
   const netPrice = locked ? existing.pricing.netPrice : record.netPrice;
-  const pendingNetPrice = locked && netPriceChanged ? record.netPrice : existing.pendingNetPrice;
+  const pendingNetPrice = !locked
+    ? existing.pendingNetPrice
+    : netPriceChanged
+      ? record.netPrice
+      : null;
 
   if (locked && netPriceChanged) {
     events.push(
@@ -317,6 +323,15 @@ function applyRecord(
         currentNetPriceCents: existing.pricing.netPrice.cents,
         pendingNetPriceCents: record.netPrice.cents,
         lockId: existing.activeLockId,
+      }),
+    );
+  }
+  if (existing.pendingNetPrice !== null && pendingNetPrice === null) {
+    events.push(
+      domainEvent('vehicle.pending_net_price_discarded', existing.id, now, {
+        pendingNetPriceCents: existing.pendingNetPrice.cents,
+        reason: 'REVERTED_BY_OWNER',
+        source: 'FEED_SYNC',
       }),
     );
   }
