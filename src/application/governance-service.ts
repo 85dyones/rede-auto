@@ -217,6 +217,8 @@ async function admit(
       clusterId: result.value.member.clusterId,
       applicationId: application.id,
       legalName: result.value.member.legalName,
+      // O aviso a rede usa o nome pelo qual as lojas se conhecem, nao a razao social.
+      tradeName: result.value.store.profile.tradeName,
       firstStoreId: result.value.store.id,
       sponsorMemberId: result.value.member.sponsorMemberId,
       // `kind` sozinho: gravar tambem "entrou na janela" seria o mesmo fato

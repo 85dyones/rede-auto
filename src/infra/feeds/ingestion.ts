@@ -184,6 +184,7 @@ export function ingestFeed(xml: string, context: IngestionContext): Result<Inges
       changes.push({ kind: ChangeKind.CREATED, vehicle: created.value });
       events.push(
         domainEvent('feed.vehicle_created', created.value.id, context.now, {
+          clusterId: context.clusterId,
           storeId: context.storeId,
           externalId: record.externalId,
           plate: created.value.plate,

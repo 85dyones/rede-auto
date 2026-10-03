@@ -742,7 +742,7 @@ ato('O mural de avisos de cada loja');
 for (const observador of [lojaB, lojaC]) {
   const avisos = await context.repos.notifications.forStore({
     storeId: observador.store.id,
-    limit: 4,
+    limit: 8,
   });
   const naoLidas = await context.repos.notifications.unreadCount(observador.store.id);
   diz(`${observador.store.profile.tradeName} — ${naoLidas} nao lidos:`);

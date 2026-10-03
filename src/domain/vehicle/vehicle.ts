@@ -780,6 +780,8 @@ export function publishNeutralPhotos(
 
   return transitioned({ ...vehicle, neutralPhotos: photos, updatedAt: now }, [
     domainEvent('vehicle.neutral_photos_published', vehicle.id, now, {
+      // O aviso vai para a praca inteira; sem ela no payload, nao vai a ninguem.
+      clusterId: vehicle.clusterId,
       ownerStoreId: vehicle.ownerStoreId,
       photoCount: photos.length,
       angles: [...present],

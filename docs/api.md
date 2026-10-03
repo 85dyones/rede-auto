@@ -976,7 +976,8 @@ Quem recebe o quê:
 | Evento | Vai para | Urgência |
 |---|---|---|
 | `vehicle.available_again` | toda a rede ativa | INFO |
-| `feed.vehicle_created` | toda a rede, menos quem publicou | INFO |
+| `vehicle.neutral_photos_published` | toda a rede, menos a dona | INFO |
+| `feed.vehicle_created` | toda a rede, menos quem publicou — só carro que entrou no catálogo (rascunho sem laudo não) | INFO |
 | `recall.requested` | loja custodiante | ACTION_REQUIRED |
 | `recall.sla_started` | loja custodiante | ACTION_REQUIRED |
 | `recall.collection_elected` | loja custodiante | ACTION_REQUIRED |
@@ -986,11 +987,12 @@ Quem recebe o quê:
 | `recall.superseded_by_sale` | loja proprietária | INFO |
 | `deal.confirmed` / `deal.settled` | loja proprietária | ACTION_REQUIRED / INFO |
 | `deal.trade_in_acceptance_requested` | loja proprietária | ACTION_REQUIRED |
+| `custody.dropped_off` | loja que recebe — o aceite tem prazo | ACTION_REQUIRED |
 | `custody.discrepancies_found` | origem e destino | ALERT |
 | `feed.duplicate_vin_detected` | as duas lojas envolvidas | ALERT |
 | `feed.vehicle_missing` (com terceiro) | proprietária e custodiante | ACTION_REQUIRED |
 | `membership.application_opened` | fundadoras, menos a padrinho | ACTION_REQUIRED |
-| `network.store_admitted` | toda a rede | INFO |
+| `network.member_admitted` | toda a rede | INFO |
 
 `lock.opened`, `lock.extended` e as mudanças de preço **não** notificam: virariam
 ruído e afogariam os avisos que exigem ação.

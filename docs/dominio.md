@@ -425,13 +425,12 @@ Toda transição emite evento; a trilha de auditoria é derivada deles, não esc
 |---|---|
 | `vehicle.*` | `listed`, `unlisted`, `withdrawn`, `available_again`, `net_price_changed`, `net_price_deferred`, `neutral_photos_published` |
 | `lock.*` | `opened`, `extended`, `expired`, `released`, `converted` |
-| `custody.*` | `checked_out`, `checked_in`, `discrepancies_found`, `transfer_cancelled`, `delivered_to_consumer` |
+| `custody.*` | `checked_out`, `dropped_off`, `checked_in`, `discrepancies_found`, `transfer_cancelled`, `delivered_to_consumer` |
 | `recall.*` | `requested`, `sla_started`, `collection_elected`, `ready_for_pickup`, `deadline_reopened`, `fulfilled`, `sla_breached`, `superseded_by_sale`, `cancelled` |
 | `deal.*` | `opened`, `trade_in_accepted`, `confirmed`, `settlement_registered`, `settled`, `atpv_registered`, `completed` |
 | `feed.*` | `vehicle_created`, `vehicle_updated`, `vehicle_missing`, `duplicate_vin_detected` |
 | `membership.*` | `application_opened`, `vote_cast`, `application_approved`, `application_rejected` |
-
-| `network.*` | `store_admitted` |
+| `network.*` | `member_admitted` |
 
 Os que uma integração de notificação deveria assinar primeiro:
 `lock.expired` e `vehicle.available_again` (o carro voltou à rede),

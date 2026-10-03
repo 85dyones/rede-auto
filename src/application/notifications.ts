@@ -17,6 +17,7 @@ import { formatDuration } from '../domain/shared/clock.ts';
 import type { ClusterId, StoreId } from '../domain/shared/ids.ts';
 import type { Store } from '../domain/network/store.ts';
 import { StoreStatus } from '../domain/network/store.ts';
+import { CommercialStatus } from '../domain/vehicle/vehicle.ts';
 import type { AppContext } from './context.ts';
 
 export const NotificationSeverity = {
@@ -42,23 +43,41 @@ export type Notification = {
   readonly readAt: Instant | null;
 };
 
-/** A quem entregar, e o texto. `null` significa "este evento não notifica". */
-type Draft = {
+type DraftText = {
   readonly severity: NotificationSeverity;
   readonly title: string;
   readonly body: string;
-  /** Lojas específicas; se ausente, é broadcast — e aí `broadcast` é obrigatório. */
-  readonly to?: readonly (StoreId | null | undefined)[];
   /** Lojas que não devem receber, mesmo no broadcast (quem causou o evento). */
   readonly except?: readonly (StoreId | null | undefined)[];
-  /**
-   * Alcance do broadcast. O `clusterId` é obrigatório aqui de propósito: "avise
-   * a rede" só faz sentido dentro de **uma** praça, e um broadcast sem praça
-   * mandaria aviso de estoque de Curitiba para uma loja de outra cidade.
-   * Exigir no tipo obriga o evento a carregar a praça no payload.
-   */
-  readonly broadcast?: { readonly clusterId: ClusterId; readonly foundersOnly?: boolean };
 };
+
+/**
+ * A quem entregar, e o texto. `null` significa "este evento não notifica".
+ *
+ * O destino e uma uniao, e nao dois campos opcionais, de proposito. Com os dois
+ * opcionais, um rascunho sem nenhum deles compilava e chegava a ninguem: foi
+ * assim que tres avisos ficaram mudos quando o broadcast passou a exigir praca,
+ * com os testes do rascunho passando. Agora cada `case` precisa dizer para onde
+ * vai, e o compilador cobra.
+ */
+type Draft = DraftText &
+  (
+    | {
+        /** Lojas específicas. */
+        readonly to: readonly (StoreId | null | undefined)[];
+        readonly broadcast?: never;
+      }
+    | {
+        /**
+         * Alcance do broadcast. O `clusterId` é obrigatório aqui de propósito: "avise
+         * a rede" só faz sentido dentro de **uma** praça, e um broadcast sem praça
+         * mandaria aviso de estoque de Curitiba para uma loja de outra cidade.
+         * Exigir no tipo obriga o evento a carregar a praça no payload.
+         */
+        readonly broadcast: { readonly clusterId: ClusterId; readonly foundersOnly?: boolean };
+        readonly to?: never;
+      }
+  );
 
 function draftFor(event: DomainEvent): Draft | null {
   const payload = event.payload;
@@ -92,14 +111,20 @@ function draftFor(event: DomainEvent): Draft | null {
         severity: NotificationSeverity.INFO,
         title: 'Material de divulgacao disponivel',
         body: 'Um veiculo da rede ganhou fotos neutras: o material ja pode ser baixado e usado no seu canal.',
+        broadcast: { clusterId: cluster() },
         except: [store('ownerStoreId')],
       };
 
     case 'feed.vehicle_created':
+      // Carro sem laudo aprovado nasce em rascunho e nao esta no estoque
+      // compartilhado. Anuncia-lo mandaria a parceira procurar no catalogo um
+      // carro que nao esta la.
+      if (payload['commercialStatus'] !== CommercialStatus.AVAILABLE) return null;
       return {
         severity: NotificationSeverity.INFO,
         title: 'Novo veículo na rede',
         body: `Uma loja publicou um veículo novo no estoque compartilhado (placa ${text('plate')}).`,
+        broadcast: { clusterId: cluster() },
         except: [store('storeId')],
       };
 
@@ -189,6 +214,17 @@ function draftFor(event: DomainEvent): Draft | null {
       };
 
     // -- custódia -------------------------------------------------------------
+    case 'custody.dropped_off':
+      // O aceite tem prazo, e perde-lo e quebra de protocolo de quem recebe.
+      // Cobrar um prazo de quem nunca foi avisado dele seria punir por uma
+      // obrigacao que a loja nao tinha como saber que existia.
+      return {
+        severity: NotificationSeverity.ACTION_REQUIRED,
+        title: 'Veículo entregue no seu pátio: falta o seu aceite',
+        body: 'Uma loja declarou a entrega de um veículo no seu pátio. Confira o carro e assine a entrada — sem o aceite no prazo, a entrega vira quebra de protocolo do seu pátio.',
+        to: [store('toStoreId')],
+      };
+
     case 'custody.discrepancies_found':
       return {
         severity: NotificationSeverity.ALERT,
@@ -226,7 +262,7 @@ function draftFor(event: DomainEvent): Draft | null {
         except: [store('sponsorStoreId')],
       };
 
-    case 'network.store_admitted':
+    case 'network.member_admitted':
       return {
         severity: NotificationSeverity.INFO,
         title: 'Nova loja na rede',
@@ -285,7 +321,7 @@ async function resolveTargets(context: AppContext, draft: Draft): Promise<StoreI
   }
 
   const broadcast = draft.broadcast;
-  if (broadcast === undefined || broadcast.clusterId === undefined) return [];
+  if (broadcast.clusterId === undefined) return [];
 
   const stores = await context.repos.stores.byCluster(broadcast.clusterId);
 
