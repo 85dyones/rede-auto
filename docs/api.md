@@ -75,6 +75,13 @@ líquido de um concorrente de outra cidade. Um veículo de outra praça responde
 O `codigo` é contrato estável — trate por ele, não pela mensagem. O `requestId`
 aparece em toda resposta e no log do servidor.
 
+**Corrida entre lojas.** Cada requisição é uma transação. Se outra requisição
+alterou ao mesmo tempo algo que esta leu, ela é refeita do zero no servidor, e
+quem responde é a regra do domínio — duas lojas travando o mesmo carro: a segunda
+recebe `409 VEHICLE_ALREADY_LOCKED`, como sempre. Só se o conflito persistir
+depois de algumas tentativas a resposta é `409 CONCURRENT_UPDATE`; repetir a
+requisição é seguro.
+
 ---
 
 ## Rede e governança

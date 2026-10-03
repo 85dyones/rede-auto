@@ -76,7 +76,7 @@ export type SeedResult = {
  * Araucaria a ~27. O raio declarado de 60 km cobre a regiao com folga e ainda
  * fica bem abaixo do teto de 300 km em que a custodia fisica deixa de fechar.
  */
-const PILOT_CLUSTER_SLUG = 'curitiba-rmc';
+export const PILOT_CLUSTER_SLUG = 'curitiba-rmc';
 
 /** Chave do segundo patio da Prime. Fixa, como as demais chaves de demo. */
 export const BOQUEIRAO_API_KEY = 'demo_prime_boqueirao';
@@ -286,8 +286,12 @@ export async function seedFoundingNetwork(
 
     const principalApiKey = `demo_${founder.slug}_titular`;
     const salespersonApiKey = `demo_${founder.slug}_vendedor`;
-    apiKeys.register(principalApiKey, { storeId, userId: principal.id, label: `${founder.tradeName} / titular` });
-    apiKeys.register(salespersonApiKey, {
+    await apiKeys.register(principalApiKey, {
+      storeId,
+      userId: principal.id,
+      label: `${founder.tradeName} / titular`,
+    });
+    await apiKeys.register(salespersonApiKey, {
       storeId,
       userId: salesperson.id,
       label: `${founder.tradeName} / vendedor`,
@@ -336,7 +340,7 @@ export async function seedFoundingNetwork(
     active: true,
   };
   await context.repos.users.save(gerenteBoqueirao);
-  apiKeys.register(BOQUEIRAO_API_KEY, {
+  await apiKeys.register(BOQUEIRAO_API_KEY, {
     storeId: segundoPatio.id,
     userId: gerenteBoqueirao.id,
     label: 'Prime Motors Boqueirao / gerente',

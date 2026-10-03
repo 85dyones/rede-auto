@@ -31,6 +31,15 @@ export function domainEvent<TType extends string, TPayload extends Record<string
 
 export type EventHandler = (event: DomainEvent) => void;
 
+/**
+ * Reacao que precisa terminar antes de a operacao ser dada como concluida —
+ * hoje, gravar o aviso no mural. Um handler sincrono que dispara uma promessa
+ * e esquece (`void deliver(...)`) deixa o aviso para depois da resposta: numa
+ * funcao serverless o processo pode congelar ali, e o aviso se perde; numa
+ * transacao, ele cairia fora dela.
+ */
+export type AsyncEventHandler = (event: DomainEvent) => Promise<void>;
+
 export type Subscription = { unsubscribe(): void };
 
 /**
@@ -40,6 +49,7 @@ export type Subscription = { unsubscribe(): void };
 export class EventBus {
   readonly #handlers = new Map<string, Set<EventHandler>>();
   readonly #wildcard = new Set<EventHandler>();
+  readonly #asyncWildcard = new Set<AsyncEventHandler>();
   readonly #onHandlerError: (error: unknown, event: DomainEvent) => void;
 
   constructor(onHandlerError?: (error: unknown, event: DomainEvent) => void) {
@@ -55,6 +65,33 @@ export class EventBus {
     const set = type === '*' ? this.#wildcard : this.#handlerSetFor(type);
     set.add(handler);
     return { unsubscribe: () => set.delete(handler) };
+  }
+
+  /**
+   * Assina todos os eventos com uma reacao assincrona. So e aguardada por
+   * `publishAllAndWait`; `publish` sozinho nao a dispara.
+   */
+  onEveryAsync(handler: AsyncEventHandler): Subscription {
+    this.#asyncWildcard.add(handler);
+    return { unsubscribe: () => this.#asyncWildcard.delete(handler) };
+  }
+
+  /**
+   * Publica e espera as reacoes assincronas terminarem, em ordem. Um handler
+   * que falha continua nao derrubando os demais nem a operacao: o erro vai para
+   * `onHandlerError`, como nos sincronos.
+   */
+  async publishAllAndWait(events: readonly DomainEvent[]): Promise<void> {
+    this.publishAll(events);
+    for (const event of events) {
+      for (const handler of this.#asyncWildcard) {
+        try {
+          await handler(event);
+        } catch (error) {
+          this.#onHandlerError(error, event);
+        }
+      }
+    }
   }
 
   publish(event: DomainEvent): void {

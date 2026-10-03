@@ -2,7 +2,8 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 
-import { buildApplication, type Application } from '../bootstrap.ts';
+import type { Application } from '../bootstrap.ts';
+import { buildTestApplication } from '../testing/application.ts';
 import { loadConfig } from '../config.ts';
 import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
@@ -72,7 +73,7 @@ const vistoria = (odometro: number, combustivel = 4) => ({
 const responsavel = { nome: 'Roberto Conferente', cpf: '529.982.247-25', funcao: 'Gerente de patio' };
 
 before(async () => {
-  app = await buildApplication({
+  app = await buildTestApplication({
     config: { ...loadConfig(), port: 0, seedDemoData: true, publicBaseUrl: '' },
     clock,
     ids: sequentialIdGenerator(),

@@ -415,6 +415,10 @@ ou o parser tivesse que lidar com namespaces de verdade.
 **Custo assumido.** O gerador de PDF não embute imagens — a ficha lista o
 material fotográfico que acompanha o kit, e as fotos vão como arquivos. A saída foi validada com pdf.js.
 
+**Revisada em um ponto** pela [decisão 32](#32-persistência-postgres-e-a-primeira-dependência-de-runtime):
+o driver do Postgres é a primeira dependência de runtime. O resto continua
+valendo.
+
 ---
 
 ## 22. Português nos limites, inglês na estrutura
@@ -453,6 +457,10 @@ primeira linha de defesa e a que produz a mensagem boa.
 O desenho já facilita isso: as funções de domínio são puras e devolvem o estado
 novo sem persistir, então envolver "carregar → decidir → salvar" numa transação
 é trabalho do serviço de aplicação, não uma reescrita.
+
+**Resolvida** na [decisão 32](#32-persistência-postgres-e-a-primeira-dependência-de-runtime).
+A transação acabou nem chegando aos serviços: ela envolve a requisição inteira,
+no servidor HTTP, e a versão de cada linha substituiu o `SELECT … FOR UPDATE`.
 
 ---
 
@@ -808,9 +816,83 @@ manter o problema em vez de resolvê-lo.
 
 | Fora de escopo | Motivo |
 |---|---|
-| Persistência real | as portas estão prontas; o adaptador exige decisão de transação que depende do banco escolhido |
+| ~~Persistência real~~ | feita na [decisão 32](#32-persistência-postgres-e-a-primeira-dependência-de-runtime) |
 | Autenticação de produção | rotação, revogação, escopo por chave e rate limit são infraestrutura, não domínio |
 | Resolução de disputa de avaria | projetar sem casos reais produziria a regra errada; as divergências já ficam registradas |
 | Precificação sugerida / integração FIPE | o produto elimina a negociação de margem; sugerir preço seria reintroduzi-la |
 | Notificações | o barramento existe e os eventos estão nomeados; falta o assinante |
 | Multi-moeda | a rede é brasileira; `Money` fixa BRL de propósito, para o tipo não mentir |
+
+---
+
+## 32. Persistência: Postgres, e a primeira dependência de runtime
+
+**Decisão.** Os dados da rede vão para o Postgres (o projeto `rede-auto` do
+Supabase), pelo driver `pg`, com a versão fixada sem `^`. É a primeira
+dependência de runtime do projeto, e revisa a [decisão 21](#21-zero-dependências-de-runtime)
+nesse ponto e só nele. Sem `DATABASE_URL`, tudo segue em memória como antes —
+os testes de domínio e a demonstração não mudaram.
+
+**Por que o `pg`, e não o protocolo escrito à mão.** A decisão 21 diz que uma
+dependência custa mais do que resolve *neste tamanho*. O protocolo do Postgres
+não é desse tamanho: autenticação SCRAM-SHA-256, TLS, protocolo estendido,
+conversão de tipos — uma superfície maior que a do próprio `pg`, e no caminho de
+toda gravação de dinheiro. Escrevê-lo inverteria o argumento que justificou o
+parser de XML.
+
+**Por que não o SQLite embutido.** Funciona — o índice único parcial foi testado
+no `node:sqlite` —, mas exige um servidor só, com disco, e a API ainda é
+experimental no Node 22. A hospedagem escolhida para o piloto é a Vercel, onde
+não há nem uma coisa nem outra.
+
+**O desenho.**
+
+- **Uma tabela por agregado**, com o agregado inteiro em `data jsonb` e, fora
+  dele, só as colunas que alguma consulta filtra ou que alguma constraint
+  precisa enxergar. O domínio devolve o agregado novo inteiro; normalizar as
+  listas internas (extensões da trava, parcelas, fotos do termo) multiplicaria
+  tabelas que nenhuma consulta usa.
+- **Schema `rede`, fora do `public`.** O Supabase expõe o `public` na API REST
+  com a chave pública; preço líquido e hash de chave não saem por ela.
+- **Uma unidade de trabalho por requisição**, levada pelo `AsyncLocalStorage`:
+  os serviços não mudaram. A concorrência é otimista — cada leitura anota a
+  versão da linha, cada gravação a confere. Quem perdeu a corrida tem a unidade
+  refeita do zero, e na nova tentativa **o domínio decide de novo**: a segunda
+  loja a travar o mesmo carro recebe o `VEHICLE_ALREADY_LOCKED` de sempre, com a
+  mensagem do domínio, e não um erro de banco.
+- **As quatro corridas da [decisão 23](#23-concorrência-o-que-muda-quando-sair-da-memória)**:
+  `openLock` tem duas camadas, a versão e o índice único parcial; a confirmação
+  da venda é uma transação; check-in duplo e liquidação dupla caem na versão.
+- **Uma quinta, que a revisão achou:** dois pedidos de recall do mesmo carro ao
+  mesmo tempo. O pedido só insere uma linha nova, e a versão só pega quem
+  regrava a mesma linha — os dois passariam. Quem pega é um índice único de
+  recall aberto por carro, e na nova tentativa o domínio responde
+  `RECALL_ALREADY_OPEN`. Regra de "só um aberto" que depende só de inserção
+  precisa de índice próprio; esta era a única com regra explícita.
+- **O mural é gravado dentro da transação**, e a entrega é aguardada antes da
+  resposta. Disparada e esquecida, ela se perderia quando a função serverless
+  congela depois de responder. Uma falha ao gravar o aviso volta só a um
+  savepoint: a venda não cai por causa do mural.
+- **As chaves de API vão para o banco**, só o hash.
+- **Migração e seed são comandos** (`npm run db:migrate`, `npm run db:seed`),
+  nunca a partida da aplicação: numa função serverless toda partida a frio
+  pagaria a checagem. Com banco, a rede de exemplo só entra se pedida — o padrão
+  de antes poria dez lojas fictícias e chaves publicadas num banco de piloto.
+- **TLS conferido por padrão** fora do localhost. A cadeia do Supabase não é
+  pública: o certificado dele vai em `DATABASE_CA_CERT`. Cifrar sem conferir só
+  acontece com `DATABASE_SSL=no-verify` explícito.
+
+**Descartado.** `SELECT … FOR UPDATE` em toda leitura serializaria também o
+catálogo, e duas requisições que leem veículo e trava em ordens diferentes
+fariam deadlock. Isolamento `SERIALIZABLE` resolveria as corridas, mas faria
+abortar também leituras que não disputam nada.
+
+**Como se testa.** As suítes de serviço e de API rodam inteiras contra os dois
+adaptadores (`TEST_DATABASE_URL=… npm run test:pg`), cada aplicação de teste
+num schema próprio. Os testes de corrida seguram as duas requisições até ambas
+terem lido o carro disponível, e só então as soltam. A mutação mostrou que a
+versão e o índice se cobrem na corrida da trava — tirar uma das camadas não
+derruba aquele teste —, e por isso cada camada tem o seu.
+
+**Custo assumido.** O `pg` traz cerca de dez pacotes transitivos, todos do mesmo
+projeto. A versão é fixa: atualizar é um ato, não um acidente do `npm install`.

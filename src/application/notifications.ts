@@ -298,13 +298,14 @@ export function previewNotification(event: DomainEvent): Draft | null {
 /**
  * Assina o barramento e materializa as notificações.
  *
- * Roda depois da transação de negócio: uma falha aqui não desfaz a venda, e o
- * `EventBus` já isola erros de handler.
+ * A entrega e aguardada por `publish`: o aviso esta gravado quando o caso de
+ * uso retorna. Antes ela era disparada e esquecida (`void deliver`), e o mural
+ * podia ser lido antes de o aviso chegar — e, numa funcao serverless, o
+ * processo pode congelar depois da resposta e o aviso nunca chegar. Uma falha
+ * aqui continua sem desfazer a venda: o `EventBus` isola erros de handler.
  */
 export function registerNotificationSubscriber(context: AppContext): void {
-  context.events.on('*', (event) => {
-    void deliver(context, event);
-  });
+  context.events.onEveryAsync((event) => deliver(context, event));
 }
 
 async function deliver(context: AppContext, event: DomainEvent): Promise<void> {

@@ -41,8 +41,14 @@ export type SweepResult = {
 };
 
 export async function runSweep(context: AppContext): Promise<SweepResult> {
-  const expiredLocks = await sweepExpiredLocks(context);
-  const breachedRecalls = await sweepRecallBreaches(context);
+  // Cada passo e uma unidade propria: um conflito no faturamento de uma praca
+  // nao desfaz as travas que ja expiraram, e nenhuma transacao fica aberta pela
+  // varredura inteira. Chamado de dentro de uma requisicao, o passo entra na
+  // transacao dela.
+  const unit = <T>(work: () => Promise<T>): Promise<T> => context.repos.unitOfWork(work);
+
+  const expiredLocks = await unit(() => sweepExpiredLocks(context));
+  const breachedRecalls = await unit(() => sweepRecallBreaches(context));
 
   // Por praca, como todo o resto: nao existe operacao que atravesse a
   // fronteira, faturamento inclusive.
@@ -54,25 +60,25 @@ export async function runSweep(context: AppContext): Promise<SweepResult> {
   let motionsLapsed = 0;
   let exitsCompleted = 0;
 
-  for (const cluster of await context.repos.clusters.all()) {
-    const billing = await runBillingSweep(context, cluster.id);
+  for (const cluster of await unit(() => context.repos.clusters.all())) {
+    const billing = await unit(() => runBillingSweep(context, cluster.id));
     chargesIssued += billing.issued;
     membersSuspended += billing.suspended;
 
     // Depois do recall: `sweepRecallBreaches` acabou de marcar os SLAs
     // estourados, e e deles que sai a quebra de conduta. Rodar antes deixaria
     // toda quebra de SLA para o passe seguinte.
-    const conduct = await runConductSweep(context, cluster.id);
+    const conduct = await unit(() => runConductSweep(context, cluster.id));
     breachesRecorded += conduct.recorded;
     storesSuspended += conduct.suspended;
     storesReopened += conduct.reopened;
 
-    motionsLapsed += await sweepLapsedMotions(context, cluster.id);
+    motionsLapsed += await unit(() => sweepLapsedMotions(context, cluster.id));
 
     // Por ultimo: a ultima pendencia de uma saida costuma fechar por um ato
     // que acabou de acontecer neste mesmo passe — uma cobranca quitada, uma
     // devolucao aceita. Rodar antes adiaria a saida em um ciclo inteiro.
-    exitsCompleted += await sweepCompletedExits(context, cluster.id);
+    exitsCompleted += await unit(() => sweepCompletedExits(context, cluster.id));
   }
 
   return {

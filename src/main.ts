@@ -13,6 +13,11 @@ const application = await buildApplication();
 const { port } = await application.start();
 
 console.log(`rede-auto ouvindo em http://localhost:${port}`);
+console.log(
+  application.config.database === null
+    ? '  dados              em memoria (somem quando o processo para)'
+    : `  dados              Postgres, schema "${application.config.database.schema}"`,
+);
 console.log(`  catalogo da rede   GET  /api/v1/veiculos`);
 console.log(`  indice das rotas   GET  /api/v1`);
 console.log(`  saude              GET  /health`);

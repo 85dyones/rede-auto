@@ -108,42 +108,43 @@ async function handle(
     }
 
     const apiKey = extractApiKey(request.headers);
-    const actor = match.isPublic ? null : await resolveActor(dependencies, apiKey);
-    // A plataforma e um ator sem loja. Chave de lojista nunca resolve para
-    // operador e vice-versa — os registros sao separados de proposito.
-    const operator = match.isPublic
-      ? null
-      : (dependencies.platformKeys?.resolve(apiKey) ?? null);
 
-    if (!match.isPublic && actor === null && operator === null) {
-      sendResponse(
-        response,
-        json(401, {
+    // Da identidade a resposta, uma unidade de trabalho: ou tudo o que a
+    // requisicao gravou vale, ou nada. Num conflito com outra requisicao a
+    // unidade e refeita do zero — por isso o corpo e lido antes, uma vez so.
+    const result = await dependencies.context.repos.unitOfWork(async (): Promise<HttpResponse> => {
+      const actor = match.isPublic ? null : await resolveActor(dependencies, apiKey);
+      // A plataforma e um ator sem loja. Chave de lojista nunca resolve para
+      // operador e vice-versa — os registros sao separados de proposito.
+      const operator = match.isPublic
+        ? null
+        : ((await dependencies.platformKeys?.resolve(apiKey)) ?? null);
+
+      if (!match.isPublic && actor === null && operator === null) {
+        return json(401, {
           erro: {
             codigo: 'AUTHENTICATION_REQUIRED',
             mensagem: 'Informe uma chave de API valida em Authorization: Bearer <chave>.',
           },
           requestId,
-        }),
+        });
+      }
+
+      const requestContext: RequestContext = {
+        method,
+        path,
+        params: match.params,
+        query: url.searchParams,
+        headers: request.headers,
+        body: parsedBody.value,
+        rawBody,
+        actor,
+        operator,
         requestId,
-      );
-      return;
-    }
+      };
 
-    const requestContext: RequestContext = {
-      method,
-      path,
-      params: match.params,
-      query: url.searchParams,
-      headers: request.headers,
-      body: parsedBody.value,
-      rawBody,
-      actor,
-      operator,
-      requestId,
-    };
-
-    const result = await match.handler(requestContext);
+      return match.handler(requestContext);
+    });
     sendResponse(response, result, requestId);
   } catch (error) {
     sendResponse(response, toErrorResponse(error, requestId), requestId);
@@ -176,7 +177,7 @@ async function resolveActor(
   dependencies: ServerDependencies,
   apiKey: string | undefined,
 ): Promise<RequestContext['actor']> {
-  const record = dependencies.apiKeys.resolve(apiKey);
+  const record = await dependencies.apiKeys.resolve(apiKey);
   if (record === undefined) return null;
 
   const store = await dependencies.context.repos.stores.byId(record.storeId);

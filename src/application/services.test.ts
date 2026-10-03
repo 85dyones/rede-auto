@@ -1,7 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildApplication, type Application } from '../bootstrap.ts';
+import type { Application } from '../bootstrap.ts';
+import { buildTestApplication } from '../testing/application.ts';
 import { loadConfig } from '../config.ts';
 import { DAY, FakeClock, HOUR, addMonths } from '../domain/shared/clock.ts';
 import { sequentialIdGenerator } from '../domain/shared/ids.ts';
@@ -80,7 +81,7 @@ const T0 = Date.parse('2026-08-24T13:00:00Z');
 
 async function novaApp(): Promise<{ app: Application; clock: FakeClock; lojaA: Actor; lojaB: Actor }> {
   const clock = new FakeClock(T0);
-  const app = await buildApplication({
+  const app = await buildTestApplication({
     config: { ...loadConfig({}), seedDemoData: true, port: 0 },
     clock,
     ids: sequentialIdGenerator(),
@@ -367,6 +368,10 @@ describe('fronteira entre pracas', () => {
         id: asStoreId('str_forasteira'),
         memberId: asMemberId('mbr_forasteira'),
         clusterId: londrina,
+        // CNPJ proprio, com a raiz da empresa dela. A copia herdava o da Veloz,
+        // o que a memoria aceitava e o banco recusa: o CNPJ do patio e unico
+        // na instalacao.
+        profile: { ...base.lojaB.store.profile, cnpj: '99887766000105' },
       },
       user: { ...base.lojaB.user, id: asUserId('usr_forasteira'), storeId: asStoreId('str_forasteira') },
     };

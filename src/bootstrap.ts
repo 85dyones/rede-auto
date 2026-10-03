@@ -15,6 +15,8 @@ import type { AppContext } from './application/context.ts';
 import { startSweeper, type Sweeper } from './application/scheduler.ts';
 import { registerNotificationSubscriber } from './application/notifications.ts';
 import { createInMemoryRepositories, type Repositories } from './infra/persistence/repositories.ts';
+import { Database } from './infra/persistence/postgres/database.ts';
+import { createPostgresRepositories } from './infra/persistence/postgres/repositories.ts';
 import { ApiKeyRegistry, PlatformKeyRegistry } from './infra/auth/api-keys.ts';
 import { Router } from './http/router.ts';
 import { json } from './http/http-types.ts';
@@ -25,7 +27,7 @@ import { registerDealRoutes } from './http/routes/deals.ts';
 import { registerMaterialRoutes } from './http/routes/material.ts';
 import { registerFeedRoutes } from './http/routes/feeds.ts';
 import { createHttpServer } from './http/server.ts';
-import { seedFoundingNetwork, type SeedResult } from './infra/seed.ts';
+import { PILOT_CLUSTER_SLUG, seedFoundingNetwork, type SeedResult } from './infra/seed.ts';
 import type { Server } from 'node:http';
 
 export type Application = {
@@ -51,34 +53,51 @@ export type BuildOptions = {
 
 export async function buildApplication(options: BuildOptions = {}): Promise<Application> {
   const config = options.config ?? loadConfig();
+
+  // O banco que a aplicacao abriu, ela fecha. Repositorios recebidos prontos
+  // (testes) sao de quem os entregou.
+  const database =
+    options.repositories === undefined && config.database !== null
+      ? new Database(config.database)
+      : null;
+
   const context: AppContext = {
     clock: options.clock ?? SystemClock,
     ids: options.ids ?? randomIdGenerator,
     events: new EventBus(),
     policies: config.policies,
-    repos: options.repositories ?? createInMemoryRepositories(),
+    repos:
+      options.repositories ??
+      (database === null ? createInMemoryRepositories() : createPostgresRepositories(database)),
   };
 
   // Assina antes do seed para que nada que aconteca depois passe despercebido.
   registerNotificationSubscriber(context);
 
-  const apiKeys = new ApiKeyRegistry();
+  const apiKeys = new ApiKeyRegistry(context.repos.credentials);
   // A plataforma e um ator sem loja: desde que o credenciamento deixou de ser
   // quorum, quem admite e recusa precisa de identidade propria na auditoria.
-  const platformKeys = new PlatformKeyRegistry();
+  const platformKeys = new PlatformKeyRegistry(context.repos.credentials);
   if (config.seedDemoData) {
-    platformKeys.register('demo_plataforma', {
+    await platformKeys.register('demo_plataforma', {
       operatorId: 'op_demo',
       name: 'Operacao rede-auto',
     });
   }
   const router = buildRouter(context, config);
 
-  const seed = config.seedDemoData
-    ? await seedFoundingNetwork(context, apiKeys, {
-        includeVehicles: options.seedVehicles ?? true,
-      })
-    : null;
+  // Com banco, a rede pode ja estar la — de uma partida anterior ou de outra
+  // instancia. Semear de novo duplicaria as lojas; o seed so roda numa praca
+  // vazia, e numa transacao: ou a rede entra inteira, ou nada entra.
+  const seed =
+    config.seedDemoData &&
+    (await context.repos.clusters.bySlug(PILOT_CLUSTER_SLUG)) === undefined
+      ? await context.repos.unitOfWork(() =>
+          seedFoundingNetwork(context, apiKeys, {
+            includeVehicles: options.seedVehicles ?? true,
+          }),
+        )
+      : null;
 
   const server = createHttpServer({
     context,
@@ -113,7 +132,8 @@ export async function buildApplication(options: BuildOptions = {}): Promise<Appl
 
     async stop() {
       sweeper?.stop();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      await database?.close();
     },
   };
 }

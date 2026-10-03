@@ -64,29 +64,35 @@ declarado de 60 km.
 |---|---|---|
 | Runtime | **Node ≥ 22.6** | TypeScript rodado nativamente por *type-stripping* |
 | Linguagem | TypeScript 5.9, `strict` + 8 flags extras | `erasableSyntaxOnly`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` |
-| Dependências de runtime | **zero** | só `typescript` e `@types/node` em dev |
+| Dependências de runtime | **uma: `pg`** | versão fixa; [decisão 32](decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime) |
 | HTTP | `node:http` puro | roteador próprio (`src/http/router.ts`), 68 rotas |
-| Persistência | **em memória** | portas assíncronas prontas; ver §8 |
-| Auth | chave de API em memória | adaptador de desenvolvimento; ver §8 |
+| Persistência | **Postgres** com `DATABASE_URL`; **em memória** sem ela | Supabase `rede-auto`, schema `rede`; transação por requisição |
+| Auth | chave de API, só o hash, no banco | adaptador de desenvolvimento; ver §8 |
 | PDF | gerador próprio (`src/infra/pdf/`) | sem biblioteca |
 | XML (feeds) | parser próprio (`src/infra/feeds/xml.ts`) | sem biblioteca, DOCTYPE rejeitado |
 | Testes | `node:test` | 584 testes, 24 arquivos |
 | Frontend | **não existe** | ver §7 |
 
-**Zero dependências de runtime é decisão, não acidente**
-([decisão 21](decisoes.md#21-zero-dependências-de-runtime)). Em troca de escrever
-um parser de XML e um gerador de PDF, o projeto não tem árvore de dependências
-para auditar, atualizar ou ser comprometido por ela. Imports usam extensão `.ts`
-explícita, o que o type-stripping exige.
+**Uma dependência de runtime só, e por decisão**
+([decisão 21](decisoes.md#21-zero-dependências-de-runtime), revisada pela
+[32](decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime)).
+Parser de XML, gerador de PDF e roteador continuam escritos à mão; o protocolo do
+Postgres, não — ele seria uma superfície maior que a do próprio `pg`. Imports
+usam extensão `.ts` explícita, o que o type-stripping exige.
 
 ### Comandos
 
 ```bash
-npm install          # 3 pacotes, todos de dev
-npm run check        # typecheck estrito + 584 testes (~3 s)
+npm install          # o pg e o que ele traz, mais os 3 pacotes de dev
+npm run check        # typecheck estrito + testes, em memória (~3 s)
 npm run demo         # 20 atos narrados, a operação inteira em relógio simulado
-npm start            # API em :3000, rede semeada, chaves no console
+npm start            # API em :3000; sem DATABASE_URL, em memória com a rede semeada
 npm run test:watch   # testes em watch
+
+# com Postgres
+DATABASE_URL=… npm run db:migrate   # cria/atualiza o schema; rodar de novo não faz nada
+DATABASE_URL=… npm run db:seed      # a rede de exemplo, só se a praça estiver vazia
+TEST_DATABASE_URL=… npm run test:pg # a suíte inteira contra o banco, um schema por app
 ```
 
 ### Variáveis de ambiente
@@ -98,7 +104,12 @@ npm run test:watch   # testes em watch
 | `PUBLIC_BASE_URL` | `http://localhost:$PORT` | monta as URLs do material de divulgação |
 | `SWEEP_INTERVAL_MS` | `60000` | intervalo do varredor periódico |
 | `MAX_BODY_BYTES` | `41943040` | teto do corpo da requisição (40 MB, por causa das fotos) |
-| `SEED_DEMO_DATA` | `true` | `false` desliga a rede semeada e as chaves fixas |
+| `SEED_DEMO_DATA` | `true` em memória, `false` com banco | a rede de exemplo e as chaves fixas; com banco, só com `true` explícito |
+| `DATABASE_URL` | — | liga o Postgres; sem ela, tudo fica em memória |
+| `DATABASE_SCHEMA` | `rede` | schema das tabelas — fora do `public`, que o Supabase expõe na API REST |
+| `DATABASE_SSL` | `verify` (remoto), `off` (localhost) | `no-verify` cifra sem conferir o certificado; só explícito |
+| `DATABASE_CA_CERT` | — | certificado da cadeia do Supabase (PEM), para o `verify` funcionar |
+| `DATABASE_POOL_MAX` | `3` | conexões por instância; numa função serverless, poucas |
 
 ### Chaves de desenvolvimento
 
@@ -583,26 +594,20 @@ lugar da interface, exibir "x de 10 fundadoras".
 
 ## 8. O que falta — na ordem em que eu faria
 
-### 1. Persistência real
+### 1. Persistência real — feita
 
-É o **único item que bloqueia um piloto com lojas de verdade**. Os repositórios
-já são portas assíncronas com adaptador em memória, então trocar não deve encostar
-em nenhum serviço de aplicação.
+Postgres no Supabase `rede-auto`, pelo `pg`
+([decisão 32](decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime)).
+O índice único parcial que este item pedia está lá, mas não sozinho: cada
+requisição é uma transação com controle de versão, e quem perde a corrida tem a
+requisição refeita — na segunda tentativa o domínio responde, com a mensagem
+dele. Oito lojas travando o mesmo carro ao mesmo tempo: uma trava, sete recebem
+`409 VEHICLE_ALREADY_LOCKED`, nenhum 500. As quatro corridas da
+[decisão 23](decisoes.md#23-concorrência-o-que-muda-quando-sair-da-memória) têm
+teste contra banco de verdade.
 
-O ponto crítico não é o Postgres, é o **índice único parcial**:
-
-```sql
-CREATE UNIQUE INDEX ON commercial_locks (vehicle_id) WHERE status = 'ACTIVE';
-```
-
-Sem ele, duas lojas leem `AVAILABLE` ao mesmo tempo e ambas travam — precisamente
-o problema que a plataforma existe para eliminar. O índice transforma a corrida
-numa violação de constraint, que o serviço traduz para o mesmo
-`409 VEHICLE_ALREADY_LOCKED` que já existe. O domínio não muda.
-
-Os outros três pontos de corrida (confirmação de venda, check-in duplo,
-liquidação simultânea) estão mapeados em
-[decisão 23](decisoes.md#23-concorrência-o-que-muda-quando-sair-da-memória).
+Falta **hospedar**: a escolha é a Vercel, e a adaptação (função, varredor por
+cron, variáveis) é o próximo passo.
 
 ### 2. Autenticação de produção
 

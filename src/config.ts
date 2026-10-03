@@ -28,6 +28,7 @@ import {
   DEFAULT_EXPULSION_POLICY,
   type ExpulsionPolicy,
 } from './domain/network/expulsion.ts';
+import { type DatabaseConfig, databaseConfigFrom } from './infra/persistence/postgres/database.ts';
 
 export type NetworkPolicies = {
   readonly governance: GovernancePolicy;
@@ -100,11 +101,14 @@ export type AppConfig = {
   readonly sweepIntervalMs: number;
   readonly maxRequestBodyBytes: number;
   readonly policies: NetworkPolicies;
-  /** Popula a rede com 6 fundadoras e estoque de exemplo. */
+  /** Popula a rede com as fundadoras de exemplo, as chaves fixas e o estoque. */
   readonly seedDemoData: boolean;
+  /** Postgres, quando `DATABASE_URL` existe. Sem ela, tudo fica em memoria. */
+  readonly database: DatabaseConfig | null;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const database = databaseConfigFrom(env);
   return {
     port: readInt(env['PORT'], 3000),
     host: env['HOST'] ?? '0.0.0.0',
@@ -117,8 +121,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sweepIntervalMs: readInt(env['SWEEP_INTERVAL_MS'], MINUTE),
     maxRequestBodyBytes: readInt(env['MAX_BODY_BYTES'], 40 * 1024 * 1024),
     policies: defaultPolicies(),
-    seedDemoData: env['SEED_DEMO_DATA'] !== 'false',
+    seedDemoData: seedDemoDataFrom(env, database),
+    database,
   };
+}
+
+/**
+ * Em memoria, a rede de exemplo e o padrao: sem ela nao ha com o que testar.
+ * Com banco, e o contrario — so semeia quem pedir. Semear por padrao poria dez
+ * lojas ficticias e chaves publicadas no log dentro do banco de um piloto.
+ */
+function seedDemoDataFrom(env: NodeJS.ProcessEnv, database: DatabaseConfig | null): boolean {
+  const flag = env['SEED_DEMO_DATA'];
+  return database === null ? flag !== 'false' : flag === 'true';
 }
 
 function readInt(value: string | undefined, fallback: number): number {
