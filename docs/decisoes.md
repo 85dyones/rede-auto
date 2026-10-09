@@ -919,14 +919,6 @@ Vercel compila esses imports, e em que versão do Node, não está no nosso
 controle; o `tsc` com `rewriteRelativeImportExtensions` gera um `dist/` que roda
 em qualquer Node, e é ele que vai.
 
-**Por que São Paulo.** A função e o banco ficam na mesma região, `gru1` na
-Vercel e `sa-east-1` no Supabase: cada requisição faz várias idas ao banco
-dentro da transação, e é nelas que a distância pesa. Entre Washington, a região
-padrão da Vercel, e São Paulo, a escolha foi a mais perto das lojas — o piloto é
-em Curitiba, e de lá cada requisição atravessaria até os Estados Unidos e
-voltaria. A região fica no `vercel.json`, e não só no painel, para o código
-dizer onde roda.
-
 **Por que o cron, e não o varredor no processo.** Na Vercel o processo não é
 contínuo: ele congela entre requisições, e cada instância varreria por conta
 própria. Com a variável `VERCEL` presente, o varredor interno não sobe.

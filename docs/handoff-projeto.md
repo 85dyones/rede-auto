@@ -66,7 +66,7 @@ declarado de 60 km.
 | Linguagem | TypeScript 5.9, `strict` + 8 flags extras | `erasableSyntaxOnly`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` |
 | Dependências de runtime | **uma: `pg`** | versão fixa; [decisão 32](decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime) |
 | HTTP | `node:http` puro | roteador próprio (`src/http/router.ts`), 68 rotas |
-| Persistência | **Postgres** com `DATABASE_URL`; **em memória** sem ela | Supabase `v2o5-site`, em São Paulo (`sa-east-1`), schema `rede`; transação por requisição |
+| Persistência | **Postgres** com `DATABASE_URL`; **em memória** sem ela | Supabase `rede-auto`, schema `rede`; transação por requisição |
 | Auth | chave de API, só o hash, no banco | adaptador de desenvolvimento; ver §8 |
 | PDF | gerador próprio (`src/infra/pdf/`) | sem biblioteca |
 | XML (feeds) | parser próprio (`src/infra/feeds/xml.ts`) | sem biblioteca, DOCTYPE rejeitado |
@@ -119,26 +119,24 @@ O servidor inteiro roda lá
 `server.mjs` carrega `dist/main.js`, que o `npm run build` gera — o
 `vercel.json` já manda rodar. Para subir:
 
-1. **Importar o repositório** num projeto novo (preset *Other*) — o do piloto
-   é o `v2o5`. A região das funções é `gru1` (São Paulo), fixada no
-   `vercel.json`; o banco é o Supabase `v2o5-site`, em `sa-east-1`, a mesma
-   região.
+1. **Importar o repositório** num projeto novo (preset *Other*). Região das
+   funções: a padrão, `iad1` — a mesma do Supabase `rede-auto` (`us-east-1`).
 2. **Variáveis**, em Production e Preview:
    - `DATABASE_URL` — a do *Transaction pooler* do Supabase (porta 6543), no
      botão *Connect* do projeto, com a senha do banco;
    - `DATABASE_CA_CERT` — o certificado em *Database Settings → SSL
      Configuration → Download certificate*, colado inteiro;
    - `CRON_SECRET` — qualquer texto aleatório longo. É o que o cron apresenta.
-3. **Schema**: `DATABASE_URL=… npm run db:migrate`, uma vez, antes do primeiro
-   deploy. Rodar de novo não faz nada. O `001_inicial` foi aplicado no
-   `v2o5-site` em 2026-10-09.
+3. **Schema**: `DATABASE_URL=… npm run db:migrate`. O `001_inicial` já foi
+   aplicado no Supabase `rede-auto` em 2026-10-03.
 4. **Varredor**: o `vercel.json` agenda um cron diário, o único que o plano
    Hobby aceita. No Pro, troque por `* * * * *`; no Hobby, o `pg_cron` do
    Supabase pode chamar `GET /api/v1/manutencao/varredura` de minuto em minuto,
    com `Authorization: Bearer <CRON_SECRET>`.
 
 A variável `VERCEL`, que a própria plataforma define, desliga o varredor dentro
-do processo.
+do processo. Para lojas em Curitiba, `gru1` com um Supabase em `sa-east-1`
+cortaria uns 120 ms por requisição — mas exige outro projeto no Supabase.
 
 ### Chaves de desenvolvimento
 
@@ -625,7 +623,7 @@ lugar da interface, exibir "x de 10 fundadoras".
 
 ### 1. Persistência real — feita
 
-Postgres no Supabase `v2o5-site`, em São Paulo, pelo `pg`
+Postgres no Supabase `rede-auto`, pelo `pg`
 ([decisão 32](decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime)).
 O índice único parcial que este item pedia está lá, mas não sozinho: cada
 requisição é uma transação com controle de versão, e quem perde a corrida tem a
