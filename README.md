@@ -22,9 +22,12 @@ se misturam (ver [Cluster](#cluster-a-rede-é-local-e-isso-é-uma-fronteira)).
 
 ```bash
 npm install
-npm start        # sobe a API em http://localhost:3000 com a rede semeada
+npm start        # sobe a API em http://localhost:3000 com a rede semeada (em memória)
 npm run demo     # roteiro narrado: a operação inteira em milissegundos
-npm run check    # typecheck estrito + 584 testes
+npm run check    # typecheck estrito + 591 testes
+
+# com Postgres: DATABASE_URL liga o banco (ver docs/handoff-projeto.md)
+DATABASE_URL=… npm run db:migrate && DATABASE_URL=… npm start
 ```
 
 ## A ideia central: físico e comercial são eixos independentes
@@ -570,9 +573,12 @@ src/
 └── testing/         builders e fixtures compartilhados
 ```
 
-**Zero dependências de runtime.** Só Node built-ins. As dev dependencies são
-TypeScript e `@types/node`; os testes rodam no `node:test` e o TypeScript é
-executado nativamente pelo Node 22 via *type stripping*.
+**Uma dependência de runtime só: o driver do Postgres.** O resto é Node
+built-in — parser de XML, gerador de PDF e roteador são escritos à mão. O `pg`
+entrou porque o protocolo do Postgres escrito à mão seria uma superfície maior
+que a dele ([decisão 32](docs/decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime)).
+As dev dependencies são TypeScript e os tipos; os testes rodam no `node:test` e
+o TypeScript é executado nativamente pelo Node 22 via *type stripping*.
 
 Três decisões estruturam o resto:
 
@@ -655,15 +661,11 @@ typecheck estrito (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,
 O que um piloto com lojas reais exigiria antes de rodar, e está fora do que foi
 entregue aqui:
 
-- **persistência real, e o índice que impede a venda duplicada.** Os
-  repositórios são portas assíncronas com adaptador em memória. Trocar por
-  Postgres não deve encostar em nenhum serviço, mas a atomicidade que hoje vem
-  de graça do processo single-threaded precisa virar explícita. O item crítico é
-  um **índice único parcial** em `(vehicle_id) WHERE status = 'ACTIVE'` na
-  tabela de travas: sem ele, duas lojas podem ler `AVAILABLE` ao mesmo tempo e
-  ambas travar — que é precisamente o problema que a plataforma existe para
-  eliminar. Detalhes e os outros três pontos de corrida em
-  [`decisoes.md`](docs/decisoes.md#23-concorrência-o-que-muda-quando-sair-da-memória).
+- ~~persistência real~~ — feita: Postgres no Supabase, uma transação por
+  requisição e o índice único parcial que impede a venda duplicada
+  ([decisão 32](docs/decisoes.md#32-persistência-postgres-e-a-primeira-dependência-de-runtime)).
+  Falta só configurar o projeto na Vercel
+  ([decisão 33](docs/decisoes.md#33-hospedagem-na-vercel-o-servidor-inteiro-não-funções)).
 - **autenticação de produção.** A chave de API é adaptador de desenvolvimento:
   falta rotação, revogação, escopo por chave (uma chave de integração de feed
   não deveria poder fechar venda) e limite de requisições.

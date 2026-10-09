@@ -61,7 +61,9 @@ export async function publish(
       recordedAt,
     });
   }
-  context.events.publishAll(events);
+  // Aguarda as reacoes assincronas (o mural): a operacao so termina com o aviso
+  // gravado, dentro da mesma transacao quando houver uma.
+  await context.events.publishAllAndWait(events);
 }
 
 export function now(context: AppContext): Instant {

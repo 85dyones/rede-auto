@@ -9,14 +9,22 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "test": "node --test \"src/**/*.test.ts\"",
     "test:watch": "node --test --watch \"src/**/*.test.ts\"",
     "start": "node src/main.ts",
     "demo": "node scripts/demo.ts",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "test:pg": "node -e \"if (!process.env.TEST_DATABASE_URL) { console.error('Defina TEST_DATABASE_URL (ex.: postgres://postgres@127.0.0.1:5433/rede_auto_test).'); process.exit(1); }\" && node --test \"src/**/*.test.ts\"",
+    "db:migrate": "node scripts/db.ts migrate",
+    "db:seed": "node scripts/db.ts seed"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
   }
 }

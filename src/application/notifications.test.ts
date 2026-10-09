@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { previewNotification, NotificationSeverity } from './notifications.ts';
 import { domainEvent } from '../domain/shared/events.ts';
-import { buildApplication, type Application } from '../bootstrap.ts';
+import type { Application } from '../bootstrap.ts';
+import { buildTestApplication } from '../testing/application.ts';
 import { loadConfig } from '../config.ts';
 import { FakeClock, HOUR } from '../domain/shared/clock.ts';
 import { asStoreId, sequentialIdGenerator, type StoreId } from '../domain/shared/ids.ts';
@@ -152,7 +153,7 @@ describe('mapa de eventos para avisos', () => {
 describe('entrega das notificacoes', () => {
   async function cenario(): Promise<{ app: Application; clock: FakeClock; lojaA: Actor; lojaB: Actor; lojaC: Actor }> {
     const clock = new FakeClock(T0);
-    const app = await buildApplication({
+    const app = await buildTestApplication({
       config: { ...loadConfig({}), seedDemoData: true, port: 0 },
       clock,
       ids: sequentialIdGenerator(),
@@ -294,15 +295,12 @@ describe('entrega das notificacoes', () => {
    * conferiam `except`, e nao havia nem `to` nem `broadcast` para onde entregar.
    */
   /**
-   * A entrega roda depois da transacao (`void deliver(...)` no assinante), e o
-   * broadcast ainda consulta lojas e fundadoras antes de gravar. Ler o mural
-   * logo depois do caso de uso pode chegar antes do aviso — espera a fila de
-   * microtarefas esvaziar, que com os repositorios em memoria e tudo o que falta.
+   * Le o mural logo depois do caso de uso, sem esperar nada. E de proposito: a
+   * entrega e aguardada por `publish`, entao o aviso tem de estar la. Com a
+   * entrega disparada e esquecida (`void deliver`), o broadcast ainda estava
+   * consultando lojas quando o teste lia — e o da padrinho, abaixo, falhava.
    */
-  const entregasPendentes = () => new Promise<void>((resolve) => setImmediate(resolve));
-
   const avisosDe = async (app: Application, loja: Actor | StoreId, tipo: string) => {
-    await entregasPendentes();
     const storeId = typeof loja === 'string' ? loja : loja.store.id;
     return (await app.context.repos.notifications.forStore({ storeId })).filter(
       (aviso) => aviso.eventType === tipo,
@@ -409,6 +407,25 @@ describe('entrega das notificacoes', () => {
       0,
       'nem pela filial',
     );
+    await app.stop();
+  });
+
+  test('o aviso esta gravado quando o caso de uso retorna, mesmo com o banco lento', async () => {
+    // Numa funcao serverless o processo pode congelar logo depois da resposta.
+    // Se a entrega fosse disparada e esquecida, o aviso dependeria de o banco
+    // responder antes disso. Aqui cada gravacao leva 20 ms, e a leitura e
+    // imediata: so passa se `publish` esperar a entrega.
+    const { app, lojaA, lojaB } = await cenario();
+    const notificacoes = app.context.repos.notifications;
+    const gravar = notificacoes.append.bind(notificacoes);
+    notificacoes.append = async (aviso) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await gravar(aviso);
+    };
+
+    unwrap(await submitApplication(app.context, lojaA, novaGaragem));
+
+    assert.equal((await avisosDe(app, lojaB, 'membership.application_opened')).length, 1);
     await app.stop();
   });
 

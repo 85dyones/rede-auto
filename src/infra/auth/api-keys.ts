@@ -12,7 +12,7 @@
  * Trocar por OIDC/JWT nao exige mexer nos servicos: eles so recebem `Actor`.
  */
 
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { StoreId, UserId } from '../../domain/shared/ids.ts';
 
 export type ApiKeyRecord = {
@@ -34,61 +34,62 @@ export type PlatformOperator = {
   readonly name: string;
 };
 
+/**
+ * Onde as chaves vivem. So o hash e gravado — a chave em claro nunca chega ao
+ * repositorio, nem em memoria nem no banco.
+ */
+export type CredentialRepository = {
+  saveStoreKey(keyHash: string, record: ApiKeyRecord): Promise<void>;
+  storeKey(keyHash: string): Promise<ApiKeyRecord | undefined>;
+  savePlatformKey(keyHash: string, operator: PlatformOperator): Promise<void>;
+  platformKey(keyHash: string): Promise<PlatformOperator | undefined>;
+};
+
+/*
+ * A busca e pelo hash SHA-256 da chave, e nao por comparacao com cada chave.
+ * Antes era um laco em tempo constante sobre todas elas, para o tempo de
+ * resposta nao vazar o prefixo certo; com as chaves no banco, isso seria ler a
+ * tabela inteira a cada requisicao. Buscar pelo hash nao tem esse vazamento: o
+ * que o tempo poderia revelar e algo sobre o hash procurado, e um hash nao
+ * serve para nada sem a chave que o gerou.
+ */
+
 export class PlatformKeyRegistry {
-  readonly #byHash = new Map<string, PlatformOperator>();
+  readonly #credentials: CredentialRepository;
 
-  register(plainKey: string, operator: PlatformOperator): void {
-    this.#byHash.set(hashKey(plainKey), operator);
+  constructor(credentials: CredentialRepository) {
+    this.#credentials = credentials;
   }
 
-  resolve(plainKey: string | undefined): PlatformOperator | undefined {
+  async register(plainKey: string, operator: PlatformOperator): Promise<void> {
+    await this.#credentials.savePlatformKey(hashKey(plainKey), operator);
+  }
+
+  async resolve(plainKey: string | undefined): Promise<PlatformOperator | undefined> {
     if (plainKey === undefined || plainKey.length === 0) return undefined;
-    const candidate = hashKey(plainKey);
-    for (const [hash, operator] of this.#byHash) {
-      if (constantTimeEquals(hash, candidate)) return operator;
-    }
-    return undefined;
-  }
-
-  size(): number {
-    return this.#byHash.size;
+    return this.#credentials.platformKey(hashKey(plainKey));
   }
 }
 
 export class ApiKeyRegistry {
-  /** hash da chave -> identidade. A chave em claro nunca fica em memoria. */
-  readonly #byHash = new Map<string, ApiKeyRecord>();
+  readonly #credentials: CredentialRepository;
 
-  register(plainKey: string, record: ApiKeyRecord): void {
-    this.#byHash.set(hashKey(plainKey), record);
+  constructor(credentials: CredentialRepository) {
+    this.#credentials = credentials;
   }
 
-  resolve(plainKey: string | undefined): ApiKeyRecord | undefined {
+  async register(plainKey: string, record: ApiKeyRecord): Promise<void> {
+    await this.#credentials.saveStoreKey(hashKey(plainKey), record);
+  }
+
+  async resolve(plainKey: string | undefined): Promise<ApiKeyRecord | undefined> {
     if (plainKey === undefined || plainKey.length === 0) return undefined;
-    const candidate = hashKey(plainKey);
-
-    // Comparacao em tempo constante para nao vazar o prefixo correto da chave
-    // pelo tempo de resposta.
-    for (const [hash, record] of this.#byHash) {
-      if (constantTimeEquals(hash, candidate)) return record;
-    }
-    return undefined;
-  }
-
-  size(): number {
-    return this.#byHash.size;
+    return this.#credentials.storeKey(hashKey(plainKey));
   }
 }
 
-function hashKey(value: string): string {
+export function hashKey(value: string): string {
   return createHash('sha256').update(value).digest('hex');
-}
-
-function constantTimeEquals(a: string, b: string): boolean {
-  const left = Buffer.from(a, 'utf8');
-  const right = Buffer.from(b, 'utf8');
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
 }
 
 /** Le a chave de `Authorization: Bearer <chave>` ou de `X-Api-Key`. */

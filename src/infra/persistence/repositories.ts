@@ -1,11 +1,10 @@
 /**
  * Portas de persistencia e o adaptador em memoria.
  *
- * As interfaces sao assincronas de proposito, apesar do adaptador atual ser
- * sincrono: trocar por Postgres nao deve exigir mexer em nenhum servico de
- * aplicacao. O que ficaria diferente num adaptador real esta anotado onde
- * importa — principalmente a transacao que envolve veiculo + trava, que aqui e
- * garantida pelo fato de o processo ser single-threaded.
+ * As interfaces sao assincronas de proposito, apesar deste adaptador ser
+ * sincrono: o do Postgres (`postgres/`) entrou sem mexer em nenhum servico de
+ * aplicacao. Os dois devolvem os resultados na mesma ordem, e as suites de
+ * servico e de API rodam contra ambos (`npm run test:pg`).
  */
 
 import type {
@@ -41,6 +40,11 @@ import type { Recall } from '../../domain/recall/recall.ts';
 import { isOpen as isRecallOpen } from '../../domain/recall/recall.ts';
 import type { Deal } from '../../domain/deal/deal.ts';
 import type { Notification } from '../../application/notifications.ts';
+import type {
+  ApiKeyRecord,
+  CredentialRepository,
+  PlatformOperator,
+} from '../auth/api-keys.ts';
 
 export type ClusterRepository = {
   save(cluster: Cluster): Promise<void>;
@@ -234,6 +238,16 @@ export type Repositories = {
   readonly deals: DealRepository;
   readonly audit: AuditRepository;
   readonly notifications: NotificationRepository;
+  readonly credentials: CredentialRepository;
+  /**
+   * Executa `work` como uma unidade: ou tudo o que ela gravou vale, ou nada.
+   *
+   * Em memoria e so chamar `work` — o processo e single-threaded e nada se
+   * cruza (decisao 23). No Postgres e uma transacao, refeita do zero quando
+   * outra operacao alterou ao mesmo tempo algo que esta leu. O servidor HTTP
+   * envolve cada requisicao numa unidade, e o varredor cada passo dele.
+   */
+  unitOfWork<T>(work: () => Promise<T>): Promise<T>;
 };
 
 // ---------------------------------------------------------------------------
@@ -672,6 +686,26 @@ class InMemoryNotificationRepository implements NotificationRepository {
   }
 }
 
+class InMemoryCredentialRepository implements CredentialRepository {
+  readonly #storeKeys = new Map<string, ApiKeyRecord>();
+  readonly #platformKeys = new Map<string, PlatformOperator>();
+
+  async saveStoreKey(keyHash: string, record: ApiKeyRecord): Promise<void> {
+    this.#storeKeys.set(keyHash, clone(record));
+  }
+  async storeKey(keyHash: string): Promise<ApiKeyRecord | undefined> {
+    const found = this.#storeKeys.get(keyHash);
+    return found === undefined ? undefined : clone(found);
+  }
+  async savePlatformKey(keyHash: string, operator: PlatformOperator): Promise<void> {
+    this.#platformKeys.set(keyHash, clone(operator));
+  }
+  async platformKey(keyHash: string): Promise<PlatformOperator | undefined> {
+    const found = this.#platformKeys.get(keyHash);
+    return found === undefined ? undefined : clone(found);
+  }
+}
+
 export function createInMemoryRepositories(): Repositories {
   return {
     clusters: new InMemoryClusterRepository(),
@@ -689,5 +723,7 @@ export function createInMemoryRepositories(): Repositories {
     deals: new InMemoryDealRepository(),
     audit: new InMemoryAuditRepository(),
     notifications: new InMemoryNotificationRepository(),
+    credentials: new InMemoryCredentialRepository(),
+    unitOfWork: (work) => work(),
   };
 }
